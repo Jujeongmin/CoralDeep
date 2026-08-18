@@ -48,22 +48,33 @@ const ATTEMPT_MULT = 20;
 const BACKING_Z = -1.8;
 
 /**
- * 바닥판 과대 크기 배수.
+ * 바닥판 여유 배율 — depthScale() 로 정확히 보정한 뒤에 얹는 안전 여유분.
  *
- * 알과 바닥판은 pxToWorld/screenToPlane 로 z=0 평면 기준 크기를 구하지만 실제로는
- * 카메라에서 더 먼 z(음수)에 놓인다. 원근 카메라에서는 카메라에서 멀수록 같은
- * 화각이 담는 월드 폭이 커지므로, z=0 기준 크기를 그대로 쓰면 먼 평면일수록
- * 화면을 살짝 못 채운다. 알은 낱개라 몇 % 모자라도 눈에 안 띄지만, 바닥판은
- * 한 장짜리라 모자란 만큼 화면 가장자리에 곧은 빈틈이 생긴다 — 훨씬 눈에 띈다.
- * 카메라 파라미터(FOV·camZ)에 안 묶이려고 필요량(z=-1.8 기준 약 18%)보다 넉넉히
- * 30% 를 준다. 한 장짜리 평면이라 과대 크기의 렌더 비용은 사실상 0이다.
+ * 반올림·부동소수점 오차로 가장자리에 1px 틈이 남는 걸 막는 정도의 작은 여유다.
+ * (이전 버전은 이 값 하나로 원근 축소분까지 떠안으려 했는데 — z=-1.8 이 필요로
+ * 하는 약 18% 보정을 30% 여유로 뭉뚱그렸다 — 그러면 여기 없는 배율만큼은
+ * 맞아도 구멍의 중심 오프셋은 안 맞는다. 구멍처럼 화면 특정 위치에 정확히
+ * 물려야 하는 경계는 크기와 중심을 함께 보정해야 하므로 depthScale() 로 뺐다.)
  */
-const BACKING_OVERSCAN = 1.3;
+const BACKING_OVERSCAN = 1.05;
 
 /** 시드 기반 0..1 난수. 프레임마다 같은 배치가 나와야 하므로 Math.random 을 안 쓴다. */
 function hash01(n: number): number {
   const s = Math.sin(n * 127.1) * 43758.5453;
   return s - Math.floor(s);
+}
+
+/**
+ * z=0 평면 기준 좌표(화면 px 와 상수배로 대응)를 z=planeZ 평면에서 같은 화면
+ * 위치·크기로 옮기는 배율.
+ *
+ * 원근 카메라는 screen ∝ world / (camZ - z) 로 투영한다. z=0 에서는 분모가
+ * camZ, z=planeZ 에서는 camZ - planeZ 이므로, 같은 screen 값을 내려면
+ * world 좌표를 (camZ - planeZ) / camZ 배 해야 한다. 크기뿐 아니라 원점으로부터의
+ * 오프셋(중심 좌표)도 같은 배율을 먹는다 — 좌표 자체가 이 식의 입력이기 때문이다.
+ */
+function depthScale(camZ: number, planeZ: number): number {
+  return (camZ - planeZ) / camZ;
 }
 
 export interface HoleBox {
@@ -154,9 +165,12 @@ export class Seafloor {
   /**
    * 구멍을 피해 자갈을 뿌리고, 바닥판을 구멍 모양대로 다시 짓는다.
    * @param hole 보드 사각형 (z=0 월드 좌표, 가운데 원점)
+   * @param camZ 카메라와 z=0 평면 사이 거리(stage.ts 의 CAM_Z). 바닥판이 z=0 이
+   *   아닌 깊이에 있어 원근 보정에 필요하다 — 하드코딩하지 않고 호출부(stage.ts)가
+   *   실제로 카메라를 세운 값을 그대로 받아, 그 값이 바뀌어도 저절로 따라가게 한다.
    */
-  layout(hole: HoleBox, view: PlaneView, seed: number): void {
-    this.layoutBacking(hole, view);
+  layout(hole: HoleBox, view: PlaneView, seed: number, camZ: number): void {
+    this.layoutBacking(hole, view, camZ);
 
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -211,10 +225,20 @@ export class Seafloor {
   /**
    * 화면 전체(과대 크기 포함)를 덮는 사각형에서 구멍 자리만 뚫어 바닥판을 다시 짓는다.
    * 구멍 위치는 보드 리사이즈마다 바뀌므로 지오메트리를 매번 새로 짓고 이전 것은 버린다.
+   *
+   * hole·view 는 z=0 평면 기준 좌표다. 바닥판은 z=0 이 아니라 BACKING_Z 에 있으므로
+   * 그 좌표를 그대로 쓰면 화면에서 어긋난다 — 원근 카메라에서 카메라로부터 먼
+   * 평면일수록 같은 화면 위치가 원점에서 더 먼 월드 좌표에 대응하기 때문이다
+   * (카메라~평면 거리에 정비례). z=0 기준 좌표를 이 평면에서 같은 화면 위치·크기로
+   * 옮기려면 거리 비율 k = (camZ - BACKING_Z) / camZ 를 곱해야 한다 — 크기뿐 아니라
+   * 원점으로부터의 오프셋(중심 좌표)도 함께 곱해야 한다. 크기만 키우고 중심을
+   * 그대로 두면 구멍은 맞는 크기로 엉뚱한 자리에 뚫린다.
    */
-  private layoutBacking(hole: HoleBox, view: PlaneView): void {
-    const halfW = (view.worldW * BACKING_OVERSCAN) / 2;
-    const halfH = (view.worldH * BACKING_OVERSCAN) / 2;
+  private layoutBacking(hole: HoleBox, view: PlaneView, camZ: number): void {
+    const k = depthScale(camZ, BACKING_Z);
+
+    const halfW = (view.worldW * BACKING_OVERSCAN * k) / 2;
+    const halfH = (view.worldH * BACKING_OVERSCAN * k) / 2;
 
     const shape = new THREE.Shape();
     shape.moveTo(-halfW, -halfH);
@@ -226,10 +250,10 @@ export class Seafloor {
     // 구멍 폭/높이가 아직 0 이하면(레이아웃 확정 전) 구멍 없이 통짜로 둔다 —
     // 0 크기 Path 는 삼각분할이 퇴화해 에러가 난다.
     if (hole.w > 0 && hole.h > 0) {
-      const hx0 = hole.cx - hole.w / 2;
-      const hx1 = hole.cx + hole.w / 2;
-      const hy0 = hole.cy - hole.h / 2;
-      const hy1 = hole.cy + hole.h / 2;
+      const hx0 = (hole.cx - hole.w / 2) * k;
+      const hx1 = (hole.cx + hole.w / 2) * k;
+      const hy0 = (hole.cy - hole.h / 2) * k;
+      const hy1 = (hole.cy + hole.h / 2) * k;
       const path = new THREE.Path();
       path.moveTo(hx0, hy0);
       path.lineTo(hx1, hy0);

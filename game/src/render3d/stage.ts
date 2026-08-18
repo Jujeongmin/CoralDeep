@@ -98,6 +98,7 @@ export class Stage3D implements Stage {
       { cx: c.x, cy: c.y, w: pxToWorld(r.w, this.view), h: pxToWorld(r.h, this.view) },
       this.view,
       Math.round(this.depth * 1000) + 7,
+      CAM_Z,
     );
   }
 
