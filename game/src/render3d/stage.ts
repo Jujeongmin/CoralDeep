@@ -10,8 +10,9 @@ import * as THREE from 'three';
 
 import { depthMood } from '../render/depth.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
-import { Seafloor } from './seafloor.ts';
+import { Seafloor, type HoleBox } from './seafloor.ts';
 import type { BoardRect, DescentPoint, SceneView, Stage } from './types.ts';
+import { WaterVolume } from './waterVolume.ts';
 
 const FOV = 45;
 const CAM_Z = 10;
@@ -31,6 +32,7 @@ export class Stage3D implements Stage {
   private board: BoardRect | null = null;
   private mood = depthMood(0);
   private seafloor = new Seafloor(this.scene);
+  private waterVolume = new WaterVolume(this.scene);
   private lights: THREE.Light[] = [];
 
   constructor(
@@ -86,6 +88,29 @@ export class Stage3D implements Stage {
     this.camera.updateProjectionMatrix();
     this.view = planeView(this.w, this.h, FOV, CAM_Z);
     if (this.board) this.setBoardRect(this.board);
+    this.waterVolume.setMood(this.mood, this.clearBand(), CAM_Z);
+  }
+
+  /**
+   * 보드 사각형 밖에서 가장 넓은 빈 띠 -- 광선은 여기에만 세운다.
+   *
+   * 보드가 화면 위쪽에 있으면 아래가, 아래쪽에 있으면 위가 넓다. 8번 과제가 보드를
+   * 아래로 내리면 이 계산은 저절로 반대로 나온다 -- 위/아래를 여기서 하드코딩하지
+   * 않는다. 보드 사각형을 아직 모르면(첫 프레임 한정) 화면 전체를 빈 띠로 본다.
+   */
+  private clearBand(): HoleBox {
+    if (!this.board) {
+      const c = screenToPlane(this.w / 2, this.h / 2, this.w, this.h, this.view);
+      return { cx: c.x, cy: c.y, w: this.view.worldW, h: this.view.worldH };
+    }
+    const boardTop = this.board.y - this.top;
+    const boardBottom = boardTop + this.board.h;
+    const aboveH = Math.max(0, boardTop);
+    const belowH = Math.max(0, this.h - boardBottom);
+    const bandTop = aboveH >= belowH ? 0 : boardBottom;
+    const bandH = Math.max(aboveH, belowH);
+    const c = screenToPlane(this.w / 2, bandTop + bandH / 2, this.w, this.h, this.view);
+    return { cx: c.x, cy: c.y, w: this.view.worldW, h: pxToWorld(bandH, this.view) };
   }
 
   setBoardRect(r: BoardRect): void {
@@ -118,6 +143,7 @@ export class Stage3D implements Stage {
 
   step(dt: number): void {
     this.seafloor.step(dt);
+    this.waterVolume.step(dt);
   }
 
   render(): void {
@@ -126,6 +152,7 @@ export class Stage3D implements Stage {
 
   dispose(): void {
     this.seafloor.dispose();
+    this.waterVolume.dispose();
     for (const l of this.lights) this.scene.remove(l);
     this.scene.clear();
     this.renderer.dispose();

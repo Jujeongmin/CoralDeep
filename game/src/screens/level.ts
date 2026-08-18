@@ -7,6 +7,7 @@ import { sfx, startAmbience, stopAmbience } from '../audio.ts';
 import { haptics } from '../haptics.ts';
 import { navigate, type NavParams } from '../router.ts';
 import { depthT, getLevel, levelReward } from '../levels.ts';
+import { depthMood } from '../render/depth.ts';
 import { randomSeed } from '../core/rng.ts';
 import {
   grantExtraMoves,
@@ -120,13 +121,12 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     ),
   );
 
-  host.append(
-    header,
-    goalRow,
-    el('main', { class: 'screen level-screen' }, canvas, stageCanvas),
-    targetHint,
-    boosterBar,
-  );
+  const screenEl = el('main', { class: 'screen level-screen' }, canvas, stageCanvas);
+  host.append(header, goalRow, screenEl, targetHint, boosterBar);
+
+  // 배경은 3D 가 아니라 CSS 다 — 3D 가 맨 앞 레이어라 배경 메시를 두면 보드를 덮는다.
+  const mood = depthMood(depthT(level.id));
+  screenEl.style.background = `linear-gradient(180deg, ${mood.top} 0%, ${mood.bottom} 100%)`;
 
   // 목표 칩과 부스터 바를 먼저 채워야 캔버스 크기가 확정된다.
   // (보드 뷰는 생성 시점의 캔버스 크기로 칸 좌표를 잡는다)

@@ -73,7 +73,7 @@ function hash01(n: number): number {
  * world 좌표를 (camZ - planeZ) / camZ 배 해야 한다. 크기뿐 아니라 원점으로부터의
  * 오프셋(중심 좌표)도 같은 배율을 먹는다 — 좌표 자체가 이 식의 입력이기 때문이다.
  */
-function depthScale(camZ: number, planeZ: number): number {
+export function depthScale(camZ: number, planeZ: number): number {
   return (camZ - planeZ) / camZ;
 }
 
