@@ -11,7 +11,15 @@
 import * as THREE from 'three';
 
 import type { DepthMood } from '../render/depth.ts';
+// depthScale/scaleHole/projectPebble 는 depthProjection.ts 의 순수 함수다 —
+// Seafloor 클래스가 쓰는 TS parameter property 문법을 npm test 의 Node 내장
+// strip-only 로더가 못 읽어서, 이 클래스를 안 거치고 그 수학만 테스트할 수 있게
+// 별도 파일로 뺐다(depthProjection.ts 상단 주석 참고). 여기서는 그대로 쓰고
+// 아래서 다시 내보내 seafloor.ts 의 기존 공개 표면(HoleBox 등)은 그대로 유지한다.
+import { depthScale, type HoleBox, projectPebble, scaleHole } from './depthProjection.ts';
 import { type PlaneView, pxToWorld } from './projection.ts';
+
+export { depthScale, type HoleBox, projectPebble, scaleHole };
 
 /**
  * 자갈 알 개수.
@@ -64,32 +72,12 @@ function hash01(n: number): number {
   return s - Math.floor(s);
 }
 
-/**
- * z=0 평면 기준 좌표(화면 px 와 상수배로 대응)를 z=planeZ 평면에서 같은 화면
- * 위치·크기로 옮기는 배율.
- *
- * 원근 카메라는 screen ∝ world / (camZ - z) 로 투영한다. z=0 에서는 분모가
- * camZ, z=planeZ 에서는 camZ - planeZ 이므로, 같은 screen 값을 내려면
- * world 좌표를 (camZ - planeZ) / camZ 배 해야 한다. 크기뿐 아니라 원점으로부터의
- * 오프셋(중심 좌표)도 같은 배율을 먹는다 — 좌표 자체가 이 식의 입력이기 때문이다.
- */
-export function depthScale(camZ: number, planeZ: number): number {
-  return (camZ - planeZ) / camZ;
-}
-
-export interface HoleBox {
-  cx: number;
-  cy: number;
-  w: number;
-  h: number;
-}
-
 export class Seafloor {
   private mesh: THREE.InstancedMesh;
   private geom: THREE.IcosahedronGeometry;
   private mat: THREE.MeshLambertMaterial;
   private backingMesh: THREE.Mesh;
-  private backingGeom: THREE.ShapeGeometry | null = null;
+  private backingGeom: THREE.BufferGeometry | null = null;
   private backingMat: THREE.MeshLambertMaterial;
   private uTime = { value: 0 };
   private uCaustic = { value: 0.5 };
@@ -115,9 +103,14 @@ export class Seafloor {
     // 무작위로 뿌린 알만으로는 화면을 다 못 덮어 틈으로 뒤 배경(CSS 그라디언트)이
     // 비친다. 알보다 한 켜 더 뒤에 깔아 자갈 알들이 그 위에 놓인 것처럼 보이게 한다.
     // geometry 는 구멍 위치가 바뀔 때마다 layout() 에서 새로 짓는다(아래 참고).
+    // 자리표시용 빈 지오메트리도 backingGeom 에 담아둔다 — 안 담아두면 첫
+    // layoutBacking() 호출이 이걸 버리지 않고 그냥 덮어써 참조가 새고, dispose()
+    // 도 이 자리표시용 geometry 는 못 건드린다(빈 attribute 라 GPU 버퍼는 없어
+    // 지금 당장은 무해하지만, 이 파일이 지키는 폐기 규율과 어긋난다).
     this.backingMat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
     this.patchCaustics(this.backingMat, false);
-    this.backingMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.backingMat);
+    this.backingGeom = new THREE.BufferGeometry();
+    this.backingMesh = new THREE.Mesh(this.backingGeom, this.backingMat);
     this.backingMesh.position.z = BACKING_Z;
     this.backingMesh.frustumCulled = false;
     scene.add(this.backingMesh);
@@ -193,21 +186,13 @@ export class Seafloor {
       // 구멍 안이면 버린다. 구멍 = 보드 = 2D 가 그리는 자리다.
       //
       // x, y, r 은 z=0 기준인데 알은 실제로 z(< 0, 카메라에서 더 멀다)에 놓인다.
-      // 원근 때문에 그 알은 화면에 x, y 가 아니라 depthScale(camZ, z) 로 나눈
-      // 자리에 찍힌다(바닥판 구멍을 지을 때와 같은 배율, 방향만 반대 — 여기서는
-      // z=0 좌표를 실제 깊이의 화면 위치로 "투영"하는 것이므로 곱하지 않고 나눈다).
-      // 중심만 투영하고 그 위에 z=0 기준 반지름 r 을 얹으면 안 된다 — 반지름도
-      // 같은 원근을 받으므로 얕은 알과 깊은 알의 실제 화면 크기가 다르다.
-      // 두 값 다 투영한 뒤에 구멍과 비교해야 "화면에 실제로 찍히는 자리"가
-      // 구멍을 침범하는지 알 수 있다. 이걸 안 하면 알마다 깊이가 달라 침범량이
-      // 들쭉날쭉해진다 — 실측에서 본 것과 같은 들쭉날쭉한 침범이 바로 이 증상이다.
-      const depthK = depthScale(camZ, z);
-      const screenX = x / depthK;
-      const screenY = y / depthK;
-      const screenR = r / depthK;
+      // projectPebble() 로 "이 알이 화면에 실제로 찍히는 자리·크기"를 구한 뒤
+      // 그걸로 구멍과 비교해야 한다 — z=0 기준 x, y, r 을 그대로 비교하면 알마다
+      // 깊이가 달라 침범량이 들쭉날쭉해진다(round 3 에서 실측한 버그).
+      const proj = projectPebble(x, y, r, z, camZ);
       if (
-        Math.abs(screenX - hole.cx) < hole.w / 2 + screenR &&
-        Math.abs(screenY - hole.cy) < hole.h / 2 + screenR
+        Math.abs(proj.x - hole.cx) < hole.w / 2 + proj.r &&
+        Math.abs(proj.y - hole.cy) < hole.h / 2 + proj.r
       ) {
         continue;
       }
@@ -262,10 +247,11 @@ export class Seafloor {
     // 구멍 폭/높이가 아직 0 이하면(레이아웃 확정 전) 구멍 없이 통짜로 둔다 —
     // 0 크기 Path 는 삼각분할이 퇴화해 에러가 난다.
     if (hole.w > 0 && hole.h > 0) {
-      const hx0 = (hole.cx - hole.w / 2) * k;
-      const hx1 = (hole.cx + hole.w / 2) * k;
-      const hy0 = (hole.cy - hole.h / 2) * k;
-      const hy1 = (hole.cy + hole.h / 2) * k;
+      const scaled = scaleHole(hole, k);
+      const hx0 = scaled.cx - scaled.w / 2;
+      const hx1 = scaled.cx + scaled.w / 2;
+      const hy0 = scaled.cy - scaled.h / 2;
+      const hy1 = scaled.cy + scaled.h / 2;
       const path = new THREE.Path();
       path.moveTo(hx0, hy0);
       path.lineTo(hx1, hy0);
