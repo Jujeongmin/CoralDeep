@@ -14,11 +14,18 @@
 // 화면 중심으로 끌려 보이므로(seafloor.ts 의 depthScale() 참고), 빈 띠를 z=0 기준으로
 // 골라 그대로 배치하면 화면에서는 안쪽으로 밀려 찍힌다. 같은 보정을 여기서도 그대로 쓴다
 // -- seafloor.ts 가 바닥판 구멍을 지을 때 쓴 것과 같은 함수, 같은 방향(곱하기)이다.
+// (여러 깊이에 걸치는 건 순전히 5장 사이 크기·시차를 살짝 다르게 주기 위해서다 --
+// 아래 depthTest: false 때문에 서로, 그리고 자갈밭과의 앞뒤 관계는 더는 문제되지 않는다.)
 //
-// -1.4 를 더 넘기지 않는다: seafloor.ts 의 바닥판(backing)이 z=-1.8 에서 화면 전체를
-// 불투명하게 덮는다(구멍은 보드 자리뿐이고, 광선이 서는 빈 띠에는 구멍이 없다). 광선
-// 재질은 depthWrite 만 끄고 depthTest 는 그대로라 바닥판보다 뒤에 두면 깊이 판정에서
-// 가려져 안 보인다. 그래서 광선은 바닥판보다 앞(덜 음수)에만 세운다.
+// depthTest 를 끈다. 광선판은 물리적으로 뭔가에 가려질 대상이 아니라 가산합성으로
+// 화면에 덧입히는 빛이다 -- depthWrite 만 끄고 depthTest 는 켜 둔 채로 두면(첫 시도가
+// 그랬다), seafloor.ts 의 바닥판(z=-1.8, 화면 전체를 덮는 불투명 판)보다 뒤에 놓인
+// 광선은 깊이 판정에서 가려 안 보였다. 그때는 광선 z 를 바닥판보다 앞으로 두는 수동
+// 여유값(0.4)으로 고쳤는데, 그 여유는 seafloor.ts 의 BACKING_Z 와 주석으로만 이어져
+// 있었다 -- BACKING_Z 가 나중에(8번 과제가 보드를 옮기며 자갈 레이어를 건드릴 수
+// 있다) 바뀌면 아무 것도 안 깨진 채 광선만 다시 조용히 사라진다. depthTest: false 로
+// 그 결합을 아예 없앤다 -- 광선은 이제 seafloor.ts 의 어떤 z 상수와도 무관하게 항상
+// 보인다. 대신 draw 순서를 renderOrder 로 못박아 둔다(아래).
 
 import * as THREE from 'three';
 
@@ -26,6 +33,15 @@ import type { DepthMood } from '../render/depth.ts';
 import { depthScale, type HoleBox } from './seafloor.ts';
 
 const MAX_SHAFTS = 5;
+
+/**
+ * 투명 오브젝트 사이 draw 순서 -- depthTest 를 꺼서 깊이 버퍼로는 순서를 안 정하므로,
+ * three 의 자동 거리 정렬에 기대지 않고 명시적으로 못박는다. Drift(마린 스노우, 기본
+ * renderOrder 0)보다 뒤에 그려 광선이 눈발 위에 얹히게 하고, 7·8번 과제가 추가할
+ * 잠수부·포식자의 반투명 효과보다도 확실히 나중에 그려지도록 넉넉히 크게 잡는다 --
+ * 광선은 "장면 맨 위에 덧입는 빛" 이라 다른 반투명 오브젝트에 가려지면 안 된다.
+ */
+const RENDER_ORDER = 10;
 
 export class WaterVolume {
   private group = new THREE.Group();
@@ -43,10 +59,12 @@ export class WaterVolume {
         opacity: 0,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        depthTest: false,
         side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(this.geom, mat);
       mesh.visible = false;
+      mesh.renderOrder = RENDER_ORDER;
       this.mats.push(mat);
       this.shafts.push(mesh);
       this.group.add(mesh);
