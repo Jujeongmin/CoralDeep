@@ -127,6 +127,9 @@ export class Stage3D implements Stage {
     const c = screenToPlane(cx, cy, this.w, this.h, this.view);
     this.seafloor.layout(
       { cx: c.x, cy: c.y, w: pxToWorld(r.w, this.view), h: pxToWorld(r.h, this.view) },
+      // 보드는 사각형이 아니다 -- cols/rows/holes 는 BoardRect 가 그대로 들고 온
+      // 칸 점유 마스크다(단위 변환이 필요 없어 그대로 넘긴다). seafloor.ts 참고.
+      { cols: r.cols, rows: r.rows, holes: r.holes },
       this.view,
       Math.round(this.depth * 1000) + 7,
       CAM_Z,

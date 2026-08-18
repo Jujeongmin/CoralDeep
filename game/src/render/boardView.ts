@@ -219,6 +219,9 @@ export class BoardView {
       w: this.cell * this.cols,
       h: this.cell * this.rows,
       cell: this.cell,
+      cols: this.cols,
+      rows: this.rows,
+      holes: this.holes,
     });
     this.scene?.resize();
     this.dirty = true;
