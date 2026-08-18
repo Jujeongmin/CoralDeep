@@ -72,7 +72,12 @@ export class Predators {
   private mat: THREE.MeshLambertMaterial;
   private lureMat: THREE.MeshBasicMaterial | null = null;
   private t = 0;
+  /** 화면에 실제로 반영되는 접근도 -- step() 이 매 프레임 targetDanger 쪽으로 완만하게 옮긴다 */
   private danger = 0;
+  /** setDanger() 가 받는 목표값. moves 기반 레벨은 이동마다 1/(총 이동 수)씩 계단으로 뛴다 —
+   * 이 값을 곧바로 렌더링에 쓰면 포식자가 뚝뚝 끊겨 다가온다(사용자 지적). danger 는 이
+   * 목표를 향해 매 프레임 지수적으로 따라가므로, 계단 하나하나가 부드러운 기울기로 이어진다. */
+  private targetDanger = 0;
 
   constructor(
     private scene: THREE.Scene,
@@ -223,8 +228,41 @@ export class Predators {
     }
   }
 
+  /**
+   * 목표 접근도만 갱신한다 -- 실제로 화면에 쓰이는 this.danger 는 step() 이 매 프레임
+   * 이 목표를 향해 완만하게 옮긴다(easeDanger() 참고). renderScene() 은 플레이어가
+   * 움직이거나 목표가 바뀔 때만 불리므로(파일 상단 브리핑), 여기서 즉시 반영해 버리면
+   * 그 사이 프레임들은 아무 변화가 없다가 다음 호출에서 한 번에 뛴다 -- 그게 "뚝뚝
+   * 끊김"의 정체다.
+   */
   setDanger(d: number): void {
-    this.danger = Math.max(0, Math.min(1, d));
+    this.targetDanger = Math.max(0, Math.min(1, d));
+  }
+
+  /**
+   * targetDanger 를 향한 지수 접근 -- dt 에 무관하게 같은 "따라잡는 비율"을 유지한다
+   * (프레임마다 고정 비율로 lerp 하면 기기 프레임레이트에 따라 체감 속도가 달라진다).
+   * alpha = 1 - e^(-dt/tau) 는 dt->0 일 때 dt/tau 로 수렴해 저프레임레이트에서도
+   * 끊기지 않고, dt 가 커도(탭 전환 등) 1을 넘지 않아 오버슈트하지 않는다.
+   *
+   * tau(시간상수)는 두 갈래다:
+   *   - DANGER_TAU(0.5s) -- 평상시. 26수 레벨 기준 한 수당 danger 가 1/26≈3.8% 씩
+   *     뛰는데, 그 계단 하나를 95% 따라잡는 데 3*tau=1.5s 걸린다 -- 다음 수가 그보다
+   *     빨리 오면(대개 그렇다) 목표가 갱신될 뿐 접근은 끊기지 않고 이어진다. 그러면서도
+   *     한 수 안에서는 눈에 보이게 "다가오는 중"으로 읽힐 만큼 빠르다.
+   *   - DANGER_TAU_CAUGHT(0.1s) -- targetDanger 가 1(포획)에 닿았을 때. afterMove() 가
+   *     danger=1 을 반영한 뒤 350ms 뒤에 실패 모달을 띄운다(level.ts) -- 그 전에 사실상
+   *     다 따라잡아야 "모달 뜰 때 아직 반쯤 다가오는 중"이 안 생긴다. tau=0.1s 면
+   *     350ms 후 커버리지 1-e^(-3.5)≈97% -- 여유 있게 안전하다.
+   */
+  private static readonly DANGER_TAU = 0.5;
+  private static readonly DANGER_TAU_CAUGHT = 0.1;
+
+  private easeDanger(dt: number): void {
+    const tau =
+      this.targetDanger >= 0.999 ? Predators.DANGER_TAU_CAUGHT : Predators.DANGER_TAU;
+    const alpha = 1 - Math.exp(-dt / tau);
+    this.danger += (this.targetDanger - this.danger) * alpha;
   }
 
   setMood(mood: DepthMood): void {
@@ -283,6 +321,7 @@ export class Predators {
 
   step(dt: number): void {
     this.t += dt;
+    this.easeDanger(dt);
     this.rebuild();
   }
 
