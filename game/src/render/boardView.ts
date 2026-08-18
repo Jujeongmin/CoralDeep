@@ -17,36 +17,6 @@ export interface BoardViewCallbacks {
   onPickCell(i: number): void;
 }
 
-/**
- * 보드 위쪽에 같이 그릴 연출(구조 미션 장면).
- * 별도 캔버스로 두면 보드와 따로 노는 박스가 되므로 한 캔버스를 나눠 쓴다.
- * 파티클도 같은 좌표계라 보드에서 터진 조각이 장면 쪽으로 날아간다.
- */
-export interface ScenePainter {
-  /** 캔버스 위쪽에서 이 장면이 차지할 높이 */
-  height(canvasH: number): number;
-  step(dt: number): void;
-  /** 잠수부를 뺀 배경. 보드보다 먼저 그린다. */
-  paintBackdrop(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void;
-  /** 잠수부. 보드를 다 그린 뒤 맨 위에 그린다 (보드 위를 지나가야 한다). */
-  paintDiver(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void;
-  /** 보드로 내려가는 동안의 위치. null 이면 장면 안 제자리. */
-  setDescent(point: { x: number; y: number; scale: number; t: number } | null): void;
-  /** 장면 안 잠수부의 현재 위치·배율 (내려오기 시작하는 지점) */
-  diverAnchor(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-  ): { x: number; y: number; scale: number };
-  /** 화면을 흔들 픽셀 양 (0 이면 흔들지 않음) */
-  shake(): number;
-  /** 장애물을 하나 부쉈을 때 반응 */
-  cheer?(): void;
-  /** 잠수부가 탈출했을 때 반응 */
-  rescued?(): void;
-}
-
 interface Sprite {
   tile: Tile;
   /** 목표 위치 기준 오프셋(px) */
@@ -119,9 +89,6 @@ export class BoardView {
   private hasDiver = false;
 
   private pointerStart: { i: number; x: number; y: number } | null = null;
-
-  /** 캔버스 위쪽에 예약된 연출 높이 (없으면 0) */
-  private sceneH = 0;
 
   /** 흘러드는 물 (칸 단위가 아니라 하나의 액체 덩어리로 그린다) */
   private water = new WaterLayer();
@@ -196,16 +163,14 @@ export class BoardView {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const pad = 6;
-    // this.scene.height(...) 는 ScenePainter 전용이라 Stage 에는 없다 (Task 7 에서 되살리거나 지운다).
-    // 3D 무대는 보드 위가 아니라 보드와 같은 화면 영역을 덮으므로 지금은 예약 높이가 0이다.
-    this.sceneH = 0;
-    const boardH = this.h - this.sceneH;
-    this.cell = Math.floor(Math.min((this.w - pad * 2) / this.cols, (boardH - pad * 2) / this.rows));
+    // 3D 무대는 보드 위가 아니라 화면 전체를 덮으므로 격자 계산에 쓸 가용 높이는
+    // 캔버스 전체 높이 그대로다.
+    this.cell = Math.floor(Math.min((this.w - pad * 2) / this.cols, (this.h - pad * 2) / this.rows));
     this.originX = Math.floor((this.w - this.cell * this.cols) / 2);
-    // 장면이 있으면 보드를 위로 붙인다 — 사이에 빈 띠가 생기면 두 영역이 다시 따로 논다
-    this.originY = this.scene
-      ? this.sceneH + pad
-      : this.sceneH + Math.floor((boardH - this.cell * this.rows) / 2);
+    // 3D 장면이 화면 전체를 덮으므로 보드는 아래쪽에 정렬한다.
+    // 위 여백은 그냥 물속이고 잠수부가 거기 떠 있다.
+    const boardH = this.cell * this.rows;
+    this.originY = Math.round(this.h - boardH - pad);
     this.artSize = Math.max(16, Math.round(this.cell * dpr));
     clearBaked();
     this.water.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr);
@@ -727,24 +692,9 @@ export class BoardView {
     ctx.save();
     if (shake !== 0) ctx.translate(shake, shake * 0.4);
 
-    if (this.scene && this.sceneH > 0) {
-      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
-      // this.scene.paintBackdrop(ctx, 0, 0, this.w, this.sceneH);
-    }
-
     const total = this.cols * this.rows;
 
     // 자갈 더미 — 3D 무대(Seafloor)가 보드보다 앞에서 그린다. 여기서는 안 그린다.
-
-    // 장면과 자갈이 맞닿는 선. 그냥 두면 두 그림을 잘라 붙인 이음매가 그대로 보인다.
-    // 위쪽 바위턱이 드리우는 그늘을 깔아 하나의 공간으로 잇는다.
-    if (this.sceneH > 0) {
-      const seam = ctx.createLinearGradient(0, this.sceneH, 0, this.sceneH + this.cell * 1.2);
-      seam.addColorStop(0, 'rgba(0, 8, 14, 0.85)');
-      seam.addColorStop(1, 'rgba(0, 8, 14, 0)');
-      ctx.fillStyle = seam;
-      ctx.fillRect(0, this.sceneH, this.w, this.cell * 1.2);
-    }
 
     // 칸 배경 — 자갈을 파낸 자리라 바닥에 해저 모래가 드러난다
     const sand = texturePattern(ctx, 'sand', (this.cell * 2.6) / 512);

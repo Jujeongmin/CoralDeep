@@ -8,9 +8,11 @@
 
 import * as THREE from 'three';
 
+import { predatorFor } from '../levels.ts';
 import { depthMood } from '../render/depth.ts';
 import { CELLS_TALL, Diver } from './diver.ts';
 import { Drift } from './particles.ts';
+import { Predators } from './predators.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
 import { Seafloor, type HoleBox } from './seafloor.ts';
 import type { BoardRect, DescentPoint, SceneView, Stage } from './types.ts';
@@ -33,10 +35,19 @@ export class Stage3D implements Stage {
   private dpr = 1;
   private board: BoardRect | null = null;
   private mood = depthMood(0);
+  /** shake() 가 참고하는 마지막 SceneView — setView() 가 매 프레임 갱신한다 */
+  private viewState: SceneView = { danger: 0, progress: 0 };
   private seafloor = new Seafloor(this.scene);
   private waterVolume = new WaterVolume(this.scene);
   private drift = new Drift(this.scene);
   private diver = new Diver(this.scene);
+  /**
+   * this.depth 는 parameter property 라 필드 초기화식보다 뒤에 대입된다
+   * (useDefineForClassFields — mood 와 같은 이유로 여기서는 초기화식이 아니라
+   * 생성자 본문에서 만든다).
+   */
+  private predators: Predators;
+  private clock = 0;
   private lights: THREE.Light[] = [];
 
   constructor(
@@ -44,6 +55,7 @@ export class Stage3D implements Stage {
     private depth: number,
   ) {
     this.mood = depthMood(this.depth);
+    this.predators = new Predators(this.scene, predatorFor(this.depth));
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
@@ -75,6 +87,7 @@ export class Stage3D implements Stage {
     this.lights = [key, fill];
     this.scene.add(key, fill);
     this.seafloor.setMood(this.mood);
+    this.predators.setMood(this.mood);
 
     this.resize();
     void this.diver.load().catch((e) => console.warn('잠수부 로드 실패', e));
@@ -167,9 +180,10 @@ export class Stage3D implements Stage {
   }
 
   setView(v: SceneView): void {
-    // progress 는 아직 아무도 안 쓴다 (8번 과제가 소품 걷힘에 쓸 예정) — 지금은
-    // danger 만 잠수부에게 넘긴다.
+    // progress 는 아직 아무도 안 쓴다 — 지금은 danger 만 잠수부와 포식자에게 넘긴다.
+    this.viewState = v;
     this.diver.setDanger(v.danger);
+    this.predators.setDanger(v.danger);
   }
 
   setDescent(p: DescentPoint | null): void {
@@ -184,17 +198,22 @@ export class Stage3D implements Stage {
   }
 
   shake(): number {
-    return 0;
+    // 코앞까지 왔을 때만 흔든다. 늘 흔들면 압박이 아니라 노이즈가 된다.
+    if (this.viewState.danger < 0.82) return 0;
+    const k = (this.viewState.danger - 0.82) / 0.18;
+    return Math.sin(this.clock * 34) * 3.2 * k;
   }
 
   cheer(): void {}
   rescued(): void {}
 
   step(dt: number): void {
+    this.clock += dt;
     this.seafloor.step(dt);
     this.waterVolume.step(dt);
     this.drift.step(dt);
     this.diver.step(dt);
+    this.predators.step(dt);
   }
 
   render(): void {
@@ -206,6 +225,7 @@ export class Stage3D implements Stage {
     this.waterVolume.dispose();
     this.drift.dispose();
     this.diver.dispose();
+    this.predators.dispose();
     for (const l of this.lights) this.scene.remove(l);
     this.scene.clear();
     this.renderer.dispose();

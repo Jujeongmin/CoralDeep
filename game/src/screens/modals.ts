@@ -30,8 +30,7 @@ import {
 import { applyVolumes, sfx, startAmbience } from '../audio.ts';
 import { navigate, reloadScreen } from '../router.ts';
 import { createWheel } from './wheelView.ts';
-import { EEL_HEAD_W, EEL_PIVOT_X, EEL_PIVOT_Y, drawEelHead } from '../render/eelRig.ts';
-import { preloadSprites, spritesReady } from '../sprites.ts';
+import { drawPart, preloadSprites, spritesReady } from '../sprites.ts';
 import type { PreBooster } from '../core/engine.ts';
 
 type Refresh = () => void;
@@ -751,12 +750,56 @@ export function openWinModal(
   );
 }
 
+// ---- 곰치 머리 리그 (render/eelRig.ts 에서 옮겨옴) ----
+//
+// 3D 장면(render3d/predators.ts)이 곰치를 저폴리 튜브로 그리게 되면서 이 2D 스프라이트
+// 조립 규칙을 쓰는 곳은 실패 모달뿐이다(8번 과제 — 원래 장면과 실패 모달이 같은 그림을
+// 쓰게 하려고 별도 파일로 분리돼 있었는데, 장면 쪽이 3D 로 바뀌며 그 이유가 사라졌다).
+// 이제 남은 유일한 소비자 옆으로 그대로 옮겨온다.
+
+/** 스프라이트 원본 크기 (viewBox) — 배율 계산용 */
+const EEL_HEAD_W = 190;
+/** 회전 기준점(목덜미)이 스프라이트 안에서 놓인 자리 */
+const EEL_PIVOT_X = 10;
+const EEL_PIVOT_Y = 60;
+
+interface EelHeadPose {
+  /** 목덜미(회전 기준점)를 놓을 캔버스 좌표 */
+  x: number;
+  y: number;
+  /** 스프라이트 원본 대비 배율 */
+  scale: number;
+  /** 0 = 다문 입, 1 = 크게 벌린 입 */
+  open: number;
+}
+
+/**
+ * 곰치 머리 한 개를 그린다.
+ *
+ * 아래턱을 먼저 그려야 위턱이 그 위를 덮어 경첩 이음매가 안 보인다.
+ * 입을 벌릴 때 아래턱만 내리면 턱이 빠진 것처럼 보인다 — 위턱도 조금 젖혀야
+ * 실제로 '벌어지는' 동작이 된다 (0.5 : 0.16 비율).
+ */
+function drawEelHead(ctx: CanvasRenderingContext2D, pose: EelHeadPose): void {
+  const { x, y, scale, open } = pose;
+  ctx.save();
+  ctx.translate(x, y);
+  // 아래턱 경첩은 머리 기준점에서 입꼬리 쪽으로 (20, 10)
+  drawPart(ctx, 'eelJaw', {
+    x: 20 * scale,
+    y: 10 * scale,
+    scale,
+    rotation: open * 0.5,
+  });
+  drawPart(ctx, 'eelHead', { x: 0, y: 0, scale, rotation: -open * 0.16 });
+  ctx.restore();
+}
+
 /**
  * 실패 모달에 띄우는 곰치 그림.
  *
  * 아이콘을 따로 그리지 않는다. 실패 화면에 나오는 곰치가 방금 쫓아오던 그 곰치와
- * 다르게 생기면 "얘한테 잡혔구나"가 안 읽힌다. 게임 장면이 쓰는 **같은 스프라이트를
- * 같은 조립 규칙(`drawEelHead`)으로** 그린다.
+ * 다르게 생기면 "얘한테 잡혔구나"가 안 읽힌다.
  *
  * 스프라이트는 <img> 라 로드가 비동기다. 모달이 뜨는 순간 아직 안 왔을 수 있으므로
  * 준비될 때까지 짧게 다시 시도한다 (한 번 그리고 끝 — 애니메이션이 아니다).

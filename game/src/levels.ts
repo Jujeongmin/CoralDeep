@@ -15,7 +15,11 @@
 //   'i' 결빙1 / 'I' 결빙2 (타일 위에 덮인 층) / 'n' 어망
 
 import type { LevelDef } from './core/types.ts';
-import type { PredatorKind, SceneVariant } from './render/levelScene.ts';
+
+/** 레벨 목표에 따라 자동으로 골라지는 장면 종류. 지도의 레벨 배지에 쓴다. */
+export type SceneVariant = 'rescue' | 'ice' | 'rock' | 'net';
+
+export type PredatorKind = 'eel' | 'angler' | 'tentacle';
 
 const ESCAPE = { type: 'escape', count: 0 } as const;
 
