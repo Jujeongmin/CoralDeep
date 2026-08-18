@@ -216,9 +216,12 @@ export class BoardView {
     this.gravel.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr, this.holes);
     this.water.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr);
     this.water.syncFrom(this.passages);
+    // 뷰포트 좌표로 넘긴다. 3D 캔버스는 이 캔버스와 다른 박스를 쓰므로
+    // 캔버스 로컬 좌표를 그대로 주면 두 박스의 차이만큼 어긋난다.
+    const box = this.canvas.getBoundingClientRect();
     this.scene?.setBoardRect({
-      x: this.originX,
-      y: this.originY,
+      x: box.left + this.originX,
+      y: box.top + this.originY,
       w: this.cell * this.cols,
       h: this.cell * this.rows,
       cell: this.cell,

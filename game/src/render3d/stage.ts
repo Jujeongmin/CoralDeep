@@ -23,6 +23,9 @@ export class Stage3D implements Stage {
   private view: PlaneView;
   private w = 1;
   private h = 1;
+  /** 이 캔버스의 뷰포트 원점 — BoardRect 가 뷰포트 좌표로 오므로 빼는 데 쓴다 */
+  private left = 0;
+  private top = 0;
   private dpr = 1;
   private board: BoardRect | null = null;
   private mood = depthMood(0);
@@ -64,6 +67,8 @@ export class Stage3D implements Stage {
 
   resize(): void {
     const rect = this.canvas.getBoundingClientRect();
+    this.left = rect.left;
+    this.top = rect.top;
     this.w = Math.max(1, Math.round(rect.width));
     this.h = Math.max(1, Math.round(rect.height));
     this.dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
@@ -77,7 +82,10 @@ export class Stage3D implements Stage {
 
   setBoardRect(r: BoardRect): void {
     this.board = r;
-    const c = screenToPlane(r.x + r.w / 2, r.y + r.h / 2, this.w, this.h, this.view);
+    // r 은 뷰포트 좌표다. 이 캔버스의 원점을 빼서 캔버스 로컬로 옮긴다.
+    const cx = r.x + r.w / 2 - this.left;
+    const cy = r.y + r.h / 2 - this.top;
+    const c = screenToPlane(cx, cy, this.w, this.h, this.view);
     this.probe.position.set(c.x, c.y, 0);
     this.probe.scale.set(pxToWorld(r.w, this.view), pxToWorld(r.h, this.view), 1);
   }

@@ -1202,16 +1202,19 @@ body {
 
 .level-screen .stage3d {
   position: absolute;
-  /* absolute 요소의 컨테이닝 블록은 .level-screen 의 padding box 다 (콘텐츠 박스가 아니다).
-     board-canvas 는 같은 .level-screen 의 콘텐츠 박스(패딩 뺀 영역)를 꽉 채우는 일반 흐름
-     요소라서, top/left 만 두고 폭을 auto 로 두면 두 캔버스의 폭이 좌우 패딩(8px)만큼
-     어긋난다. 게다가 canvas 는 대체 요소라 width:auto 는 (0,0) 이 아니라 캔버스의
-     width/height 속성(버퍼 크기)을 그대로 쓴다 — inset 만으로는 절대 안 풀린다.
-     그래서 폭/높이를 calc 로 직접 못박는다. .level-screen 의 padding: 0 8px 값과
-     맞춰야 두 캔버스가 같은 박스를 공유한다. */
-  top: 0;
-  left: 8px;
-  width: calc(100% - 16px);
+  inset: 0;
+  /* width/height 를 반드시 명시한다. canvas 는 replaced element 라 inset:0 만으로는
+     늘어나지 않고 자기 buffer 크기(width/height 속성)로 레이아웃된다. 게다가
+     renderer.setSize(w, h, false) 는 inline style 을 안 건드리므로, 빼먹으면
+     rect -> buffer -> rect 로 캔버스가 리사이즈마다 커지는 피드백 루프가 생긴다.
+
+     3D 캔버스는 board-canvas 와 다른 박스다 — 설계상 3D 는 화면 전체 배경이고
+     보드는 그 위 2D 오버레이다(.level-screen 의 좌우 패딩 안쪽). .level-screen 은
+     border 가 없어 padding box == border box 이므로 inset:0 + width/height:100% 는
+     정확히 .level-screen 의 전체 화면 박스를 덮는다. 두 캔버스가 다른 박스를 쓰므로
+     보드 사각형은 캔버스 로컬 좌표가 아니라 뷰포트 좌표로 주고받는다
+     (render3d/types.ts 의 BoardRect, boardView.ts 의 setBoardRect 호출부 참고). */
+  width: 100%;
   height: 100%;
   z-index: 2;
   pointer-events: none;
