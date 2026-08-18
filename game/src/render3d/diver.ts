@@ -77,21 +77,50 @@ export class Diver {
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    // 잠수부는 화면에서 바로 읽혀야 하는 감정적 중심인데, 실측(라이브 WebGL
-    // 픽셀)에서 헬멧 구리색(약 RGB 186/148/86) 픽셀이 0개 나왔다 — 배경 톤과
-    // 같은 물빛 조명(key 0xdff4ff, hemisphere mood.top/bottom)이 구리색의 R 채널을
-    // G 보다 더 세게 눌러 색상 순서 자체가 뒤집혔기 때문이다(R/G 비가 라이팅
-    // 전 1.26 -> 라이팅 후 약 0.84). 두 가지로 고친다:
-    //  1) fog 제외 -- 잠수부는 이 장면에서 카메라와 가장 가까운 물체(z=1.2)라
-    //     원경 안개가 짙게 걸리는 게 애초에 물리적으로도 맞지 않는다.
-    //  2) 재질 색조 보정 -- MeshLambertMaterial 의 diffuse 는 최종 라이팅 결과에
-    //     그대로 곱해지는 순수 배율이라(directDiffuse/indirectDiffuse 둘 다),
-    //     R 을 올리고 G/B 를 살짝 낮추면 조명이 어떻게 걸리든(그림자건 하이라이트건)
-    //     비율이 항상 같은 배로 보정된다 -- NdotL 기반 음영은 그대로 살아있으므로
-    //     '조명받는 것처럼' 보이지, 스티커처럼 붙는 게 아니다. 전체 밝기(luma)는
-    //     거의 그대로다(R 가중치가 작아 G/B 인하와 상쇄된다) -- 튀지 않는다.
-    this.mat.color.setRGB(1.6, 0.8, 0.8);
     this.mat.fog = false;
+    // 재질 색조(diffuse 곱)만 데운 1라운드 수정은 실측에서 그대로 실패했다
+    // (헬멧 구리색 픽셀이 여전히 0에 가까웠다 — 30/44,550). 원인을 셋으로 좁혀
+    // node_modules/three/src 를 직접 읽어 하나씩 지웠다:
+    //  - fog: WebGLProgram 의 program cache key 가 `useFog = material.fog === true`
+    //    로 정확히 갈리므로(WebGLPrograms.js) `mat.fog = false` 는 구조적으로
+    //    맞다 — 이것만으로는 설명이 안 된다.
+    //  - vColor 도달: color_vertex.glsl.js/color_fragment.glsl.js 를 읽으면
+    //    `diffuseColor *= vColor` 는 감쇠 없는 순수 곱셈이고, diver.glb 를
+    //    parseGlb() 로 직접 파싱해도(노드에서 재현) 헬멧 정점이 정확히
+    //    RGB 186/148/86 로 나온다 — 데이터 자체는 살아있다.
+    //  - 그런데 diffuse(재질색)*vColor 는 순수 곱셈이라, 둘 중 하나라도 라이팅
+    //    체인 어딘가에서 사실상 0에 가깝게 눌리면 재질 색조를 아무리 틀어도
+    //    (배율을 바꿔도) 결과는 그대로 어둡다 — 실측에서 색조 보정이 아무
+    //    효과가 없었던 건 이 곱셈 체인 자체가 신뢰할 수 없다는 신호다.
+    //  - 게다가 waterVolume.ts 의 광선판은 `depthTest:false` + `transparent`
+    //    라(그 파일 주석에 이미 있듯 의도적이다) 항상 불투명 오브젝트 다음에,
+    //    깊이 판정 없이 화면에 얹힌다 — 가운데 광선(5장 중 3번째, k=0.5)은
+    //    clear.cx(빈 띠 중심)에 회전 없이 서고, 이 x 는 잠수부의 anchor.x 와
+    //    같다(둘 다 clearBand() 중심). 즉 잠수부 바로 위에 청록색 가산광이
+    //    거의 항상 얹힌다 — 라이팅 체인이 어떻든 그 위에 또 한 겹 물빛이 덮인다.
+    // 결론: 곱셈(재질 색조·라이팅)에 기대는 방식은 그 체인 전체가 맞아야
+    // 살아남는데, 실측이 두 번 다 이걸 배신했다. 그래서 이번엔 곱셈이 아니라
+    // '무슨 일이 있어도 살아남는' 덧셈으로 바꾼다 — 자기 정점색을 재질 조명이
+    // 끝난 뒤, fog·톤매핑·컬러스페이스 변환까지 다 지나간 마지막 지점(=
+    // dithering_fragment, seafloor.ts 코스틱 패치와 같은 삽입점)에서 그대로
+    // 한 번 더 더한다. 이러면 라이팅 체인이 그를 얼마나 눌렀든, 광선판이 위에
+    // 얼마나 덮이든(가산 0.05~0.15 opacity 수준은 이 덧셈 앞에서 무시할
+    // 수준이다) 그의 진짜 색이 화면에 남는다 — 곱셈에만 기대지 않는다.
+    this.mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         // vColor 는 color_pars_fragment 가 이미 선언해 둔 varying 이다(USE_COLOR
+         // 가 vertexColors:true 로 항상 켜져 있으므로 여기서 참조해도 안전하다).
+         // 0.9 배로 그대로 더한다 — 헬멧처럼 색이 강한 정점은 크게(구리 RGB
+         // 186/148/86 근처가 거의 그대로 얹힌다), 어두운 네오프렌 정점(값이
+         // 작다)은 조금만 밝아져 구리/네오프렌 대비는 유지된다. 조명에 따른
+         // 음영(NdotL)은 이 아래 라이팅 결과에 이미 들어있으므로 그 위에
+         // 얹히는 식이라 '조명받는 채로 색이 진하다'로 보이지, 스티커처럼
+         // 평평해지지 않는다.
+         gl_FragColor.rgb += vColor.rgb * 0.9;`,
+      );
+    };
   }
 
   async load(): Promise<void> {
