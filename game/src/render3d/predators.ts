@@ -47,7 +47,31 @@ const EEL_TOOTH_X = 0.045;
 //   down    = |EEL_JAW_OFFSET.y| + EEL_JAW_SIZE.y/2 = 0.12 + 0.025 = 0.145
 //   side    = EEL_JAW_SIZE.x/2 = 0.07
 //   reach   = sqrt(0.45² + 0.145² + 0.07²) ≈ 0.478 -> 여유를 두고 0.5 로 올린다.
-// (주둥이·눈·이빨은 각각 계산해도 이보다 작다 — 주둥이 0.40, 눈 0.334, 이빨 0.382.)
+// (주둥이·눈·이빨은 각각 계산해도 이보다 작다 — 주둥이 0.40, 눈 0.334, 이빨 0.382.
+//  아래 눈동자·눈두덩도 마찬가지로 작다 — 눈동자 ≈0.330, 눈두덩 ≈0.330.)
+
+// 곰치 색 — 실패 모달(modals.ts 의 eelArt())이 그리는 곰치 그림과 같은 정체성으로
+// 맞춘다. 그 그림은 `assets/sprites/eel-head.svg`·`eel-jaw.svg` 의 SVG 그라디언트다
+// (몸통 ehSkin #8fb44e~#2d4a1d, 눈 ehEye #ffe9a1~#9a6206, 입안 ehMouth #54121c~#8c2f3a,
+// 이빨 #f4f7f2). "쫓아오던 그 곰치에게 잡혔다"가 읽히려면 장면과 패널이 같은 색이어야
+// 하지만, 이쪽은 저폴리 플랫 셰이딩이라 그림자·하이라이트까지 그대로 옮기지 않고
+// 대표색만 뽑는다 — 초록 몸통 · 호박색 눈(진한 세로 동공 + 짙은 눈두덩) · 흰 이빨 ·
+// 붉은 입안, 넷이면 정체성은 충분하다.
+const EEL_GREEN = new THREE.Color(0x5c8433); // ehSkin 그라디언트 중간톤
+/** 몸통 정점 색의 꼬리 쪽 끝 — 다른 포식자가 여전히 쓰는 기존 어두운 물빛 톤과 같다.
+ * 곰치도 꼬리 쪽은 이 색에 잠기고, 머리로 갈수록 EEL_GREEN 으로 바뀐다(buildEelBodyColors 참고). */
+const EEL_GREEN_TAIL = new THREE.Color(0.17, 0.27, 0.31);
+const EEL_EYE_IRIS = 0xe8a81f; // ehEye 그라디언트 중간(호박색)
+const EEL_EYE_PUPIL = 0x120c04; // ehEye 동공
+const EEL_BROW = 0x1e3317; // 그림 속 눈두덩(눈 소켓) 톤
+const EEL_MOUTH = new THREE.Color(0x6c2029); // ehMouth 그라디언트 중간(붉은 입안)
+const EEL_TEETH = 0xf4f7f2; // 그림의 이빨색
+/** 동공(눈알 표면에 얹는 얇은 상자) 반지름과, 눈 중심에서 접선 방향으로 얼마나 앞인가 */
+const EEL_PUPIL_RADIUS = 0.022;
+const EEL_PUPIL_FORWARD = 0.03;
+/** 눈두덩 — 두 눈을 가로지르는 띠 하나로 겸한다(좌우 따로 만들면 드로우콜이 는다) */
+const EEL_BROW_SIZE = new THREE.Vector3(0.24, 0.02, 0.05);
+const EEL_BROW_OFFSET = new THREE.Vector3(0, EEL_EYE_OFFSET.y + 0.09, EEL_EYE_OFFSET.z - 0.02);
 
 // 아귀 머리 — 유인등(lure)만으로는 '튜브에 매달린 구슬'로 읽혀 몸통과 머리가
 // 안 갈린다. 작은 주둥이 덩어리 + 눈만 더해 머리 윤곽을 준다(턱·이빨은 아귀
@@ -71,6 +95,10 @@ export class Predators {
   private curve: THREE.CatmullRomCurve3;
   private mat: THREE.MeshLambertMaterial;
   private lureMat: THREE.MeshBasicMaterial | null = null;
+  /** 곰치 전용 — 주둥이·아래턱은 몸통과 색이 달라(초록/붉은 입안) 더는 this.mat 을
+   * 공유하지 않는다. setMood() 가 밝기 스칼라만 따로 곱하려 참조를 들고 있는다. */
+  private eelSnoutMat: THREE.MeshLambertMaterial | null = null;
+  private eelJawMat: THREE.MeshLambertMaterial | null = null;
   private t = 0;
   /** 화면에 실제로 반영되는 접근도 -- step() 이 매 프레임 targetDanger 쪽으로 완만하게 옮긴다 */
   private danger = 0;
@@ -84,7 +112,14 @@ export class Predators {
     private kind: PredatorKind,
   ) {
     this.curve = new THREE.CatmullRomCurve3(this.controlPoints(0));
-    this.mat = new THREE.MeshLambertMaterial({ color: 0x2c4450, flatShading: true });
+    this.mat = new THREE.MeshLambertMaterial({
+      color: 0x2c4450,
+      flatShading: true,
+      // 곰치만 몸통에 꼬리->머리 정점 색 그라디언트를 쓴다(buildEelBodyColors 참고) —
+      // 재질 자체는 그 색 위에 곱해지는 밝기 스칼라로만 쓰이므로 vertexColors 를 켠다.
+      // 다른 두 종은 기존처럼 재질 색이 곧 몸 색이다.
+      vertexColors: kind === 'eel',
+    });
     this.body = new THREE.Mesh(
       new THREE.TubeGeometry(this.curve, TUBE_SEG, 0.28, TUBE_RADIAL, false),
       this.mat,
@@ -98,6 +133,7 @@ export class Predators {
       this.head = this.buildAnglerHead();
       this.group.add(this.head);
     } else if (kind === 'eel') {
+      this.buildEelBodyColors();
       this.head = this.buildEelHead();
       this.group.add(this.head);
     }
@@ -106,25 +142,61 @@ export class Predators {
   }
 
   /**
-   * 곰치 머리 — 주둥이(스냅) + 눈 두 개 + 아래턱 + 이빨 두 개. 전부 저폴리
-   * primitive 몇 개라 삼각형 172개, 드로우콜 6개(스냅1 · 눈2 · 턱1 · 이빨2)뿐이다.
-   * 매 프레임 rebuild() 가 이 그룹 전체를 튜브 끝 제어점에 옮기고 접선으로
-   * 돌리기만 한다 — 지오메트리는 여기서 한 번만 만든다(프레임마다 재할당 금지).
+   * 몸통 튜브에 꼬리(어두운 물빛) -> 머리(초록) 정점 색 그라디언트를 굽는다.
+   *
+   * TubeGeometry 는 항상 같은 순서로 정점을 낸다(node_modules/three/src/geometries/
+   * TubeGeometry.js 의 generateBufferData — 바깥 루프가 i=0..tubularSegments, 안쪽
+   * 루프가 j=0..radialSegments). i 가 곧 곡선을 따라간 위치(u=i/tubularSegments,
+   * 0=꼬리 쪽 첫 제어점 · 1=머리 쪽 끝 제어점)다. TUBE_SEG·TUBE_RADIAL 이 상수라
+   * 정점 개수·순서가 프레임마다 안 바뀌므로 — rebuild() 가 매 프레임 다시 쓰는 건
+   * position/normal 뿐이다 — 색 attribute 는 여기서 딱 한 번만 굽는다.
+   *
+   * 머리 근처에 초록이 몰리도록(요청: "머리가 다른 동물에 이어붙인 것처럼 안 보이게")
+   * t=sqrt(u) 로 앞쪽에서 빠르게 초록에 다다르게 한다 — u=0.25 지점에서 이미 t=0.5.
+   */
+  private buildEelBodyColors(): void {
+    const radialCount = TUBE_RADIAL + 1;
+    const segCount = TUBE_SEG + 1;
+    const colors = new Float32Array(segCount * radialCount * 3);
+    const c = new THREE.Color();
+    for (let i = 0; i < segCount; i++) {
+      const u = i / TUBE_SEG;
+      const t = Math.sqrt(u);
+      c.copy(EEL_GREEN_TAIL).lerp(EEL_GREEN, t);
+      for (let j = 0; j < radialCount; j++) {
+        const idx = (i * radialCount + j) * 3;
+        colors[idx] = c.r;
+        colors[idx + 1] = c.g;
+        colors[idx + 2] = c.b;
+      }
+    }
+    this.body.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
+  /**
+   * 곰치 머리 — 주둥이 + 눈(호박색 홍채 · 세로 동공 · 눈두덩) + 아래턱(붉은 입안) +
+   * 이빨 두 개. 실패 모달의 곰치 그림(파일 상단 "곰치 색" 주석 참고)과 같은 팔레트를
+   * 쓴다. 전부 저폴리 primitive라 드로우콜 9개(주둥이1 · 홍채2 · 동공2 · 눈두덩1 ·
+   * 턱1 · 이빨2)뿐이다. 매 프레임 rebuild() 가 이 그룹 전체를 튜브 끝 제어점에
+   * 옮기고 접선으로 돌리기만 한다 — 지오메트리는 여기서 한 번만 만든다.
    */
   private buildEelHead(): THREE.Group {
     const g = new THREE.Group();
 
-    // 주둥이 — 몸통 재질(this.mat)을 그대로 써서 setMood() 의 깊이별 어둡기를
-    // 자동으로 같이 받는다(따로 관리할 재질을 늘리지 않는다).
+    // 주둥이 — 더는 몸통 재질(this.mat)을 공유하지 않는다(몸통은 이제 정점 색
+    // 그라디언트를 쓴다). 그라디언트의 머리 쪽 끝 색(EEL_GREEN)을 그대로 들고
+    // setMood() 가 몸통과 같은 밝기 스칼라로 맞춰 낮춘다.
     const snoutGeom = new THREE.SphereGeometry(EEL_SNOUT_RADIUS, 8, 6);
-    const snout = new THREE.Mesh(snoutGeom, this.mat);
+    this.eelSnoutMat = new THREE.MeshLambertMaterial({ color: EEL_GREEN, flatShading: true });
+    const snout = new THREE.Mesh(snoutGeom, this.eelSnoutMat);
     snout.position.set(0, 0, EEL_SNOUT_FORWARD);
     g.add(snout);
     this.headGeoms.push(snoutGeom);
+    this.headMats.push(this.eelSnoutMat);
 
-    // 눈 — 항상 진하게, 물빛에 안 묻히게 MeshBasicMaterial(비조명)로 둔다.
+    // 눈 — 호박색 홍채는 항상 밝게, 물빛에 안 묻히게 MeshBasicMaterial(비조명)로 둔다.
     const eyeGeom = new THREE.SphereGeometry(EEL_EYE_RADIUS, 6, 4);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
+    const eyeMat = new THREE.MeshBasicMaterial({ color: EEL_EYE_IRIS });
     const eyeR = new THREE.Mesh(eyeGeom, eyeMat);
     eyeR.position.copy(EEL_EYE_OFFSET);
     const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
@@ -133,18 +205,48 @@ export class Predators {
     this.headGeoms.push(eyeGeom);
     this.headMats.push(eyeMat);
 
-    // 아래턱 — 몸통 재질과 같은 톤이면 눈에 안 띄므로 살짝 밝은 안쪽 색을 준다.
+    // 동공 — 홍채 표면에 살짝 앞서 얹는 진한 세로 슬릿. 구체보다 저폴리 예산이
+    // 싼 얇은 상자로 대신한다.
+    const pupilGeom = new THREE.BoxGeometry(
+      EEL_PUPIL_RADIUS * 1.4,
+      EEL_PUPIL_RADIUS * 2.6,
+      EEL_PUPIL_RADIUS,
+    );
+    const pupilMat = new THREE.MeshBasicMaterial({ color: EEL_EYE_PUPIL });
+    const pupilR = new THREE.Mesh(pupilGeom, pupilMat);
+    pupilR.position.set(EEL_EYE_OFFSET.x, EEL_EYE_OFFSET.y, EEL_EYE_OFFSET.z + EEL_PUPIL_FORWARD);
+    const pupilL = new THREE.Mesh(pupilGeom, pupilMat);
+    pupilL.position.set(
+      -EEL_EYE_OFFSET.x,
+      EEL_EYE_OFFSET.y,
+      EEL_EYE_OFFSET.z + EEL_PUPIL_FORWARD,
+    );
+    g.add(pupilR, pupilL);
+    this.headGeoms.push(pupilGeom);
+    this.headMats.push(pupilMat);
+
+    // 눈두덩 — 두 눈을 가로지르는 짙은 띠 하나로 "다크 브로우"를 준다(좌우 따로
+    // 만들면 드로우콜만 늘고 이 크기에서는 안 갈린다).
+    const browGeom = new THREE.BoxGeometry(EEL_BROW_SIZE.x, EEL_BROW_SIZE.y, EEL_BROW_SIZE.z);
+    const browMat = new THREE.MeshBasicMaterial({ color: EEL_BROW });
+    const brow = new THREE.Mesh(browGeom, browMat);
+    brow.position.copy(EEL_BROW_OFFSET);
+    g.add(brow);
+    this.headGeoms.push(browGeom);
+    this.headMats.push(browMat);
+
+    // 아래턱 — 벌어진 입 안쪽을 암시하는 붉은 톤(그림의 ehMouth 계열).
     const jawGeom = new THREE.BoxGeometry(EEL_JAW_SIZE.x, EEL_JAW_SIZE.y, EEL_JAW_SIZE.z);
-    const jawMat = new THREE.MeshLambertMaterial({ color: 0x8a9a95, flatShading: true });
-    const jaw = new THREE.Mesh(jawGeom, jawMat);
+    this.eelJawMat = new THREE.MeshLambertMaterial({ color: EEL_MOUTH, flatShading: true });
+    const jaw = new THREE.Mesh(jawGeom, this.eelJawMat);
     jaw.position.copy(EEL_JAW_OFFSET);
     g.add(jaw);
     this.headGeoms.push(jawGeom);
-    this.headMats.push(jawMat);
+    this.headMats.push(this.eelJawMat);
 
     // 이빨 — 아래턱 윗면에서 위로 돋은 작은 원뿔 두 개(벌어진 턱의 암시).
     const toothGeom = new THREE.ConeGeometry(EEL_TOOTH_RADIUS, EEL_TOOTH_HEIGHT, 3);
-    const toothMat = new THREE.MeshBasicMaterial({ color: 0xe9ecec });
+    const toothMat = new THREE.MeshBasicMaterial({ color: EEL_TEETH });
     const toothY = EEL_JAW_OFFSET.y + EEL_JAW_SIZE.y / 2 + EEL_TOOTH_HEIGHT / 2;
     const toothR = new THREE.Mesh(toothGeom, toothMat);
     toothR.position.set(EEL_TOOTH_X, toothY, EEL_JAW_OFFSET.z);
@@ -267,7 +369,17 @@ export class Predators {
 
   setMood(mood: DepthMood): void {
     const k = 1 - mood.gloom * 0.5;
-    this.mat.color.setRGB(0.17 * k, 0.27 * k, 0.31 * k);
+    if (this.kind === 'eel') {
+      // 색상 자체는 몸통 정점 색(buildEelBodyColors)과 머리 파츠 고유 색이 이미
+      // 담당한다 — 재질 색은 무채색 밝기 스칼라로만 곱해야 그 아래 색상비가
+      // 안 틀어진다(0.17/0.27/0.31 처럼 색이 있는 계수를 곱하면 정점 그라디언트가
+      // 다시 청회색 쪽으로 밀린다).
+      this.mat.color.setRGB(k, k, k);
+      this.eelSnoutMat?.color.copy(EEL_GREEN).multiplyScalar(k);
+      this.eelJawMat?.color.copy(EEL_MOUTH).multiplyScalar(k);
+    } else {
+      this.mat.color.setRGB(0.17 * k, 0.27 * k, 0.31 * k);
+    }
     if (this.lureMat) {
       this.lureMat.color.setRGB(
         mood.glowColor[0] / 255,
@@ -331,8 +443,10 @@ export class Predators {
     this.mat.dispose();
     this.lure?.geometry.dispose();
     this.lureMat?.dispose();
-    // 머리 부품 중 주둥이는 this.mat(몸통 재질)을 그대로 쓰므로 위에서 이미
-    // 해제됐다 — headGeoms/headMats 는 머리 전용으로 새로 만든 것들만 담는다.
+    // 머리 부품 재질(주둥이·눈·동공·눈두덩·턱·이빨)은 전부 headMats 에 담겨 있다 —
+    // 이제 몸통 재질(this.mat)을 공유하는 부품이 없다(주둥이도 초록 전용 재질을
+    // 따로 쓴다). body.geometry.dispose() 가 위에서 이미 몸통에 새로 붙인 color
+    // attribute 까지 함께 해제한다.
     for (const geom of this.headGeoms) geom.dispose();
     for (const mat of this.headMats) mat.dispose();
   }
