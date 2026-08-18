@@ -5,11 +5,10 @@
 
 import type { Blocker, Board, Phase, Special, Tile } from '../core/types.ts';
 import { idx } from '../core/types.ts';
-import { DIVER_SPAN } from './diverRig.ts';
 import { WaterLayer } from './water.ts';
 import { TILE_ART, bakedTile, clearBaked, preloadTiles } from '../tiles.ts';
 import { texturePattern } from '../textures.ts';
-import type { Stage } from '../render3d/types.ts';
+import type { DescentPoint, Stage } from '../render3d/types.ts';
 
 export interface BoardViewCallbacks {
   /** 인접한 두 칸을 맞바꾸려 할 때 */
@@ -807,14 +806,10 @@ export class BoardView {
     // 입구 / 탈출구 표시
     if (this.hasDiver) this.drawRescueMarkers();
 
-    // 잠수부는 장면이 그린다. 보드 위를 지나가야 하므로 타일보다 뒤에 그릴 수 없다.
-    if (this.scene && this.sceneH > 0) {
-      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
-      // 값 자체(descentPoint)는 그대로 두고 scene 으로 넘기는 두 줄만 끈다.
-      this.descentPoint();
-      // this.scene.setDescent(this.descentPoint());
-      // this.scene.paintDiver(ctx, 0, 0, this.w, this.sceneH);
-    }
+    // 잠수부는 3D 무대가 그린다 — 3D 캔버스가 보드보다 앞이라 타일 위를 지나가도
+    // 가려지지 않는다. 탈출 중이 아니면 descentPoint() 가 null 을 돌려주고
+    // setDescent(null) 은 장면 안 제자리로 돌아가라는 신호가 된다.
+    this.scene?.setDescent(this.descentPoint());
 
     // 선택 / 힌트.
     //
@@ -1208,33 +1203,33 @@ export class BoardView {
   }
 
   /**
-   * 탈출 중 잠수부가 있어야 할 캔버스 좌표.
+   * 탈출 중 잠수부가 있어야 할 화면 좌표.
    *
    * 경로 위를 따라가되, 앞머리 구간에서는 장면 속 제자리에서 첫 칸까지 미끄러져 들어온다.
    * (갑자기 보드 안에서 튀어나오면 위에 있던 그 사람이라는 게 안 읽힌다)
+   *
+   * 반환 좌표는 뷰포트 기준이다(render3d/types.ts 의 BoardRect 와 같은 규칙) — 3D
+   * 캔버스는 이 보드 캔버스와 다른 박스를 쓰므로, 캔버스 로컬 좌표를 그대로 넘기면
+   * 두 박스의 차이만큼 어긋난다. Stage3D.setDescent() 가 자기 캔버스 로컬로 옮긴다.
    */
-  private descentPoint(): { x: number; y: number; scale: number; t: number } | null {
+  private descentPoint(): DescentPoint | null {
     const path = this.escapePath;
     if (!path || path.length === 0) return null;
 
-    // 수로 폭이 한 칸이다. 전신 200 단위가 약 두 칸 높이가 되도록 잡는다.
-    const boardScale = (this.cell * 1.9) / DIVER_SPAN;
-
-    const entryX = this.cellX(path[0]) + this.cell / 2;
-    const entryY = this.cellY(path[0]) + this.cell / 2;
+    const box = this.canvas.getBoundingClientRect();
+    const entryX = box.left + this.cellX(path[0]) + this.cell / 2;
+    const entryY = box.top + this.cellY(path[0]) + this.cell / 2;
 
     // 앞 15% 는 장면에서 보드 첫 칸으로 들어오는 구간
     const ENTER = 0.15;
     if (this.escapeT < ENTER) {
       const p = this.escapeT / ENTER;
-      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
-      // const from = this.scene?.diverAnchor(0, 0, this.w, this.sceneH);
-      let from: { x: number; y: number; scale: number } | undefined;
-      if (!from) return { x: entryX, y: entryY, scale: boardScale, t: this.escapeT };
+      const from = this.scene?.diverAnchorScreen();
+      if (!from) return { x: entryX, y: entryY, cell: this.cell, t: this.escapeT };
       return {
         x: from.x + (entryX - from.x) * p,
         y: from.y + (entryY - from.y) * p,
-        scale: from.scale + (boardScale - from.scale) * p,
+        cell: this.cell,
         t: this.escapeT,
       };
     }
@@ -1242,14 +1237,14 @@ export class BoardView {
     const t = ((this.escapeT - ENTER) / (1 - ENTER)) * (path.length - 1);
     const n = Math.min(path.length - 2, Math.max(0, Math.floor(t)));
     const frac = path.length > 1 ? t - n : 0;
-    const ax = this.cellX(path[n]) + this.cell / 2;
-    const ay = this.cellY(path[n]) + this.cell / 2;
-    const bx = this.cellX(path[Math.min(path.length - 1, n + 1)]) + this.cell / 2;
-    const by = this.cellY(path[Math.min(path.length - 1, n + 1)]) + this.cell / 2;
+    const ax = box.left + this.cellX(path[n]) + this.cell / 2;
+    const ay = box.top + this.cellY(path[n]) + this.cell / 2;
+    const bx = box.left + this.cellX(path[Math.min(path.length - 1, n + 1)]) + this.cell / 2;
+    const by = box.top + this.cellY(path[Math.min(path.length - 1, n + 1)]) + this.cell / 2;
     return {
       x: ax + (bx - ax) * frac,
       y: ay + (by - ay) * frac,
-      scale: boardScale,
+      cell: this.cell,
       t: this.escapeT,
     };
   }

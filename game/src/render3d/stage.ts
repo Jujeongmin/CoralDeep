@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 
 import { depthMood } from '../render/depth.ts';
+import { CELLS_TALL, Diver } from './diver.ts';
 import { Drift } from './particles.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
 import { Seafloor, type HoleBox } from './seafloor.ts';
@@ -35,6 +36,7 @@ export class Stage3D implements Stage {
   private seafloor = new Seafloor(this.scene);
   private waterVolume = new WaterVolume(this.scene);
   private drift = new Drift(this.scene);
+  private diver = new Diver(this.scene);
   private lights: THREE.Light[] = [];
 
   constructor(
@@ -75,6 +77,7 @@ export class Stage3D implements Stage {
     this.seafloor.setMood(this.mood);
 
     this.resize();
+    void this.diver.load().catch((e) => console.warn('잠수부 로드 실패', e));
   }
 
   resize(): void {
@@ -142,13 +145,37 @@ export class Stage3D implements Stage {
       (right / this.w) * 2 - 1,
       1 - (top / this.h) * 2,
     );
+
+    // 잠수부 제자리 -- 보드 밖 빈 띠의 가운데. 오늘은 보드가 위에 있어 띠가 아래지만,
+    // 8번 과제가 보드를 내리면 clearBand() 가 저절로 반대로 계산해 주므로 여기서
+    // 위/아래를 가정하지 않는다.
+    const band = this.clearBand();
+    const anchor = {
+      x: (band.cx / this.view.worldW + 0.5) * this.w,
+      y: (0.5 - band.cy / this.view.worldH) * this.h,
+    };
+    // 대기 크기가 빈 띠보다 크면 가만히 있어도 보드를 침범한다 -- 띠 높이(10% 여유)에
+    // 맞춰 잠수부 기준 칸 크기를 줄인다. 대부분의 레이아웃에서는 r.cell 그대로 쓴다.
+    const bandHeightPx = band.h * this.view.pxPerWorld;
+    const cellPx = Math.min(r.cell, (bandHeightPx * 0.9) / CELLS_TALL);
+    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z);
   }
 
-  setView(_v: SceneView): void {}
-  setDescent(_p: DescentPoint | null): void {}
+  setView(v: SceneView): void {
+    // progress 는 아직 아무도 안 쓴다 (8번 과제가 소품 걷힘에 쓸 예정) — 지금은
+    // danger 만 잠수부에게 넘긴다.
+    this.diver.setDanger(v.danger);
+  }
+
+  setDescent(p: DescentPoint | null): void {
+    // p 는 BoardRect 와 같은 기준(뷰포트 좌표) -- 이 캔버스 로컬로 옮겨서 넘긴다.
+    const local = p ? { ...p, x: p.x - this.left, y: p.y - this.top } : null;
+    this.diver.setDescent(local, this.view, this.w, this.h, CAM_Z);
+  }
 
   diverAnchorScreen(): { x: number; y: number } {
-    return { x: this.w / 2, y: this.h * 0.22 };
+    const a = this.diver.anchorScreen();
+    return { x: a.x + this.left, y: a.y + this.top };
   }
 
   shake(): number {
@@ -162,6 +189,7 @@ export class Stage3D implements Stage {
     this.seafloor.step(dt);
     this.waterVolume.step(dt);
     this.drift.step(dt);
+    this.diver.step(dt);
   }
 
   render(): void {
@@ -172,6 +200,7 @@ export class Stage3D implements Stage {
     this.seafloor.dispose();
     this.waterVolume.dispose();
     this.drift.dispose();
+    this.diver.dispose();
     for (const l of this.lights) this.scene.remove(l);
     this.scene.clear();
     this.renderer.dispose();
