@@ -150,6 +150,17 @@ export class BoardView {
     this.dirty = true;
   }
 
+  /**
+   * 3D 무대는 비동기로 로드되므로(render3d/index.ts 의 createStage) 뷰가 만들어진
+   * 뒤에 붙는다 -- 생성자 시점에는 아직 없을 수 있다는 뜻이다. 붙는 즉시 한 번
+   * resize() 를 불러 이미 확정된 보드 사각형을 넘겨준다 -- 안 하면 다음 리사이즈
+   * 전까지 3D 쪽은 보드가 어디 있는지 모른다.
+   */
+  setStage(s: Stage | null): void {
+    this.scene = s;
+    if (s) this.resize();
+  }
+
   // ---------- 레이아웃 ----------
 
   resize(): void {

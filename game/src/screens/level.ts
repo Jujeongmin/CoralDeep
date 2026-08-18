@@ -25,7 +25,7 @@ import {
 } from '../core/engine.ts';
 import { findFirstHint } from '../core/match.ts';
 import { BoardView } from '../render/boardView.ts';
-import { Stage3D } from '../render3d/stage.ts';
+import { type Stage, createStage } from '../render3d/index.ts';
 import { preloadSprites } from '../sprites.ts';
 import { recordLevelClear, addPearls, spendHeart, useBoosterItem } from '../economy.ts';
 import { getSave, type BoosterId } from '../storage.ts';
@@ -131,18 +131,33 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   renderGoals();
   renderBoosters();
 
-  // 같은 캔버스 위쪽에 장면을 함께 그린다 (박스가 따로 놀지 않게)
-  const stage = new Stage3D(stageCanvas, depthT(level.id));
+  const view = new BoardView(canvas, state.board, {
+    onSwapRequest: (a, b) => void handleSwap(a, b),
+    onPickCell: (i) => void handlePick(i),
+  });
 
-  const view = new BoardView(
-    canvas,
-    state.board,
-    {
-      onSwapRequest: (a, b) => void handleSwap(a, b),
-      onPickCell: (i) => void handlePick(i),
-    },
-    stage,
-  );
+  // 3D 는 나중에 붙는다. 그때까지 보드는 이미 놀고 있어야 한다.
+  //
+  // three 는 여기서 처음 내려받는다 -- 지도·수족관 화면은 이 코드를 안 거치므로
+  // 앱을 켜자마자 받을 이유가 없다(render3d/index.ts 참고). WebGL 을 못 따거나
+  // 로드 도중 뭔가 터지면 createStage() 가 null 을 주고, 그때는 캔버스를 감춰
+  // CSS 그라디언트 배경만 남긴다 -- 보드는 이미 위에서 만들어졌으니 그대로 논다.
+  let stage: Stage | null = null;
+  let destroyed = false;
+  void createStage(stageCanvas, depthT(level.id)).then((s) => {
+    // screen:destroy 가 로드 도중 먼저 왔으면(레벨을 빨리 나간 경우) 화면에 붙이지
+    // 않고 바로 해제한다 -- 안 그러면 이미 사라진 화면에 렌더러가 남는다.
+    if (destroyed) {
+      s?.dispose();
+      return;
+    }
+    if (!s) {
+      stageCanvas.style.display = 'none';
+      return;
+    }
+    stage = s;
+    view.setStage(s);
+  });
 
   // ---- 갱신 ----
 
@@ -208,7 +223,8 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
 
     // Stage3D 는 danger·progress 만 받는다 (render3d/types.ts 의 SceneView).
     // 구조 인원 표시(rescued/total)는 LevelScene 전용이었다 — Task 7/8 에서 되살릴지 정한다.
-    stage.setView({
+    // stage 는 비동기로 붙으므로(위 createStage) 아직 없을 수 있다 — 그동안은 조용히 넘어간다.
+    stage?.setView({
       danger,
       progress: target > 0 ? done / target : 0,
     });
@@ -428,7 +444,11 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       cols: state.board.w,
       rows: state.board.h,
       view,
-      stage,
+      // stage 는 비동기로 붙었다 뗐다 하므로(위 createStage) 값이 아니라 getter로
+      // 매번 최신 참조를 돌려준다 -- 값으로 캡처하면 로드 전 null 로 고정된다.
+      get stage() {
+        return stage;
+      },
       get busy() {
         return busy;
       },
@@ -492,7 +512,10 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       window.clearInterval(timer);
       stopAmbience();
       view.destroy();
-      stage.dispose();
+      // 아직 createStage() 가 진행 중이면(destroyed 플래그) 위 .then() 이 도착하는 대로
+      // 알아서 dispose 한다 -- 여기서는 이미 붙어 있는 stage 만 해제한다.
+      destroyed = true;
+      stage?.dispose();
     },
     { once: true },
   );

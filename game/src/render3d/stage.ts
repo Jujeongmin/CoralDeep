@@ -49,6 +49,27 @@ export class Stage3D implements Stage {
   private predators: Predators;
   private clock = 0;
   private lights: THREE.Light[] = [];
+  /** 프레임 시간(ms) 지수평활 -- observe() 가 매 프레임 갱신한다 */
+  private frameMs = 16;
+  /** 현재 품질 티어: 0(최고)..3(최저) */
+  private tier = 0;
+  /**
+   * 마지막으로 티어를 바꾼 시각(this.clock 기준, 초). 최소 체류 시간(TIER_DWELL_SEC)을
+   * 재는 기준점이다. 0 으로 시작하면 clock 도 0 에서 시작하므로, 무대가 막 뜬 직후
+   * (에셋 로드·JIT 워밍업으로 프레임이 튀기 쉬운 구간)에는 자동으로 유예 기간이 생긴다
+   * -- 그 자체가 노림수다.
+   */
+  private tierChangedAt = 0;
+  /**
+   * 티어를 바꾼 뒤 이 시간(초) 동안은 다시 안 바꾼다.
+   *
+   * frameMs 자체가 지수평활(0.05)로 이미 완만하지만, 경계값(22ms/15ms) 바로 위아래를
+   * 오가는 구간에서는 평활만으로 매 프레임 티어가 뒤집히는 걸 막지 못한다. 1.5초는
+   * frameMs 평활의 시상수(20프레임 안팎, 60fps 기준 0.3~0.4초)보다 넉넉히 길어서
+   * 한두 번의 튐으로는 못 넘고, 그러면서도 실제로 느려진 기기에서는 몇 초 안에
+   * 체감 가능한 속도로 낮춰준다.
+   */
+  private static readonly TIER_DWELL_SEC = 1.5;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -208,12 +229,40 @@ export class Stage3D implements Stage {
   rescued(): void {}
 
   step(dt: number): void {
+    this.observe(dt);
     this.clock += dt;
     this.seafloor.step(dt);
     this.waterVolume.step(dt);
     this.drift.step(dt);
     this.diver.step(dt);
     this.predators.step(dt);
+  }
+
+  /**
+   * 프레임이 밀리면 스스로 깎는다. 순서는 눈에 덜 띄는 것부터다:
+   * 부유물 수 -> 광선 수 -> 해상도.
+   */
+  private observe(dt: number): void {
+    this.frameMs += (dt * 1000 - this.frameMs) * 0.05;
+    // 최소 체류 시간 -- 경계값 근처에서 매 프레임 뒤집히는 걸 막는다.
+    if (this.clock - this.tierChangedAt < Stage3D.TIER_DWELL_SEC) return;
+    if (this.frameMs > 22 && this.tier < 3) this.setTier(this.tier + 1);
+    else if (this.frameMs < 15 && this.tier > 0) this.setTier(this.tier - 1);
+  }
+
+  /**
+   * 티어 t 를 절대값으로 적용한다 -- 이전 티어에서 얼마나 깎여 있었는지와 무관하게
+   * 항상 같은 결과가 나온다. drift/waterVolume 의 setQuality(k) 는 매번 "기준값의
+   * k 배"로 다시 계산하지 (이미 깎인 값에 또 곱하지) 않으므로, 2 -> 1 -> 2 처럼
+   * 오르내려도 갈수록 더 깎이는 일이 없다.
+   */
+  private setTier(t: number): void {
+    this.tier = t;
+    this.tierChangedAt = this.clock;
+    this.drift.setQuality(t >= 1 ? 0.5 : 1);
+    this.waterVolume.setQuality(t >= 2 ? 0.4 : 1);
+    this.waterVolume.setMood(this.mood, this.clearBand(), CAM_Z);
+    this.renderer.setPixelRatio(t >= 3 ? 1.25 : this.dpr);
   }
 
   render(): void {
