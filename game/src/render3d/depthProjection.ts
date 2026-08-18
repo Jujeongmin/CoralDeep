@@ -63,3 +63,66 @@ export function projectPebble(
   const k = depthScale(camZ, z);
   return { x: x / k, y: y / k, r: r / k };
 }
+
+/**
+ * 깊이 z 에 이미 놓인 물체 위에 world 단위로 더한 변위(worldDelta)가 화면에서
+ * 몇 px 로 보이는가.
+ *
+ * diver.ts 의 잠수부는 place()/setDescent() 가 중심 좌표·크기를 depthScale(camZ, z)
+ * 로 미리 보정해 두지만(z=0 기준 좌표를 곱해서 depth 에 심는다), 그 위에 얹는
+ * 흔들림(bob) 같은 애니메이션 오프셋은 world 좌표계에 직접 더해진다 — 이미 보정된
+ * 좌표 위에 보정 안 된 변위를 얹는 셈이다. 그 변위가 화면에 나타날 때는 원근
+ * 카메라의 screen ∝ world / (camZ - z) 관계 그대로 적용되므로, place() 가 곱하는
+ * 방향(depthScale, z=0 -> z 로 심을 때 축소)과 반대로 카메라에 가까울수록
+ * (depthScale(camZ, z) < 1) 더 크게 보인다 — 나누는 방향이다.
+ */
+export function screenDelta(
+  camZ: number,
+  z: number,
+  worldDelta: number,
+  pxPerWorld: number,
+): number {
+  return (worldDelta * pxPerWorld) / depthScale(camZ, z);
+}
+
+/**
+ * screenDelta() 의 역함수 — 화면에서 이만큼만 흔들리길 원할 때(screenDeltaPx),
+ * 깊이 z 에서 필요한 world 변위. 흔들림 진폭을 화면 여유(빈 띠 안 남는 px)에
+ * 맞춰 거꾸로 잡을 때 쓴다.
+ */
+export function worldDeltaForScreen(
+  camZ: number,
+  z: number,
+  screenDeltaPx: number,
+  pxPerWorld: number,
+): number {
+  return (screenDeltaPx * depthScale(camZ, z)) / pxPerWorld;
+}
+
+/**
+ * 대기 중인 잠수부가 흔들려도 되는 world 진폭의 상한.
+ *
+ * 대기 크기(heightPx, 이미 빈 띠 높이에 맞춰 줄어 있을 수 있다 — stage.ts 의 클램프
+ * 참고)를 빈 띠(bandHeightPx) 가운데 두면 위아래로 (bandHeightPx - heightPx) / 2 씩
+ * 여유가 남는다. 그런데 몸이 기울면(tilt, 화면 평면 축 회전) 실루엣이 세운 키의
+ * 절반보다 더 뻗는다 — 어떤 각도로 기울어도 실루엣은 반지름
+ * sqrt((h/2)^2 + (w/2)^2) 인 원을 벗어나지 못한다는 사실로(각도별로 정확히 계산할
+ * 필요 없이 모든 각도에 안전한 상한이다), 그 초과분을 여유에서 먼저 뗀 뒤 나머지를
+ * 흔들림에 배정한다. 남는 px 여유는 worldDeltaForScreen() 으로 world 단위로 바꾼다.
+ *
+ * widthRatio 는 실루엣의 가로/세로 비(w/h). 회전축이 세로축인 요(yaw)은 y 좌표를
+ * 그대로 두므로 세로 실루엣을 넓히지 않는다 — 이 함수는 기울기(tilt)만 본다.
+ */
+export function maxIdleBobWorld(
+  heightPx: number,
+  bandHeightPx: number,
+  widthRatio: number,
+  camZ: number,
+  z: number,
+  pxPerWorld: number,
+): number {
+  const halfMargin = Math.max(0, (bandHeightPx - heightPx) / 2);
+  const rotationReach = (heightPx / 2) * (Math.hypot(1, widthRatio) - 1);
+  const marginPx = Math.max(0, halfMargin - rotationReach);
+  return worldDeltaForScreen(camZ, z, marginPx, pxPerWorld);
+}

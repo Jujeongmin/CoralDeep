@@ -159,9 +159,11 @@ export class Stage3D implements Stage {
     };
     // 대기 크기가 빈 띠보다 크면 가만히 있어도 보드를 침범한다 -- 띠 높이(10% 여유)에
     // 맞춰 잠수부 기준 칸 크기를 줄인다. 대부분의 레이아웃에서는 r.cell 그대로 쓴다.
+    // bandHeightPx 는 place() 에 그대로 넘긴다 -- 흔들림(bob) 상한도 같은 빈 띠
+    // 안에서 계산해야 하기 때문이다(diver.ts 참고).
     const bandHeightPx = band.h * this.view.pxPerWorld;
     const cellPx = Math.min(r.cell, (bandHeightPx * 0.9) / CELLS_TALL);
-    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z);
+    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z, bandHeightPx);
   }
 
   setView(v: SceneView): void {

@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 
-import { depthScale } from './depthProjection.ts';
+import { depthScale, maxIdleBobWorld } from './depthProjection.ts';
 import { parseGlb } from './glb.ts';
 import { type PlaneView, pxToWorld, screenToPlane } from './projection.ts';
 import type { DescentPoint } from './types.ts';
@@ -29,6 +29,13 @@ const HOME_Z = 1.2;
 /** 탈출 경로 z — 3D 레이어가 보드 앞이므로 z 만 양수면 타일에 안 가려진다 */
 const DESCENT_Z = 1.0;
 
+/**
+ * diver.glb 버텍스 바운딩 박스 실측(X extent / Y extent ≈ 0.336, 살짝 올려 잡았다).
+ * 대기 중 흔들림이 빈 띠를 넘는지 계산할 때(maxIdleBobWorld) 몸이 기울어도(tilt)
+ * 실루엣이 세운 키의 절반을 얼마나 넘길 수 있는지 잡는 데 쓴다.
+ */
+const MODEL_WIDTH_RATIO = 0.34;
+
 export class Diver {
   private mesh: THREE.Mesh | null = null;
   private geom: THREE.BufferGeometry | null = null;
@@ -38,6 +45,8 @@ export class Diver {
   private home = new THREE.Vector3();
   private homeScreen = { x: 0, y: 0 };
   private homeScale = 1;
+  /** 대기 중 흔들림이 넘으면 안 되는 world 진폭 상한 — place() 가 빈 띠 크기로 잡는다 */
+  private maxBobWorld = 0;
   private descent: DescentPoint | null = null;
   /** load() 가 아직 fetch 중일 때 dispose() 가 불리면 죽은 scene 에 메시를 넣지 않는다 */
   private disposed = false;
@@ -65,9 +74,14 @@ export class Diver {
   /**
    * 장면 안 제자리 (탈출 전).
    * @param anchor 화면 px (호출부의 캔버스 로컬 기준 — Stage3D 가 자기 캔버스 기준으로 준다)
+   * @param cellPx 대기 크기 기준 칸 px — 이미 빈 띠 높이에 맞춰 줄어 있을 수 있다
+   *   (stage.ts 의 클램프 참고).
    * @param camZ 카메라와 z=0 평면 사이 거리(stage.ts 의 CAM_Z). 잠수부가 z=0 이 아닌
    *   HOME_Z 에 있어 원근 보정에 필요하다 — seafloor.ts/waterVolume.ts 와 같은 이유로
    *   하드코딩하지 않고 호출부가 실제 카메라 값을 넘긴다.
+   * @param bandHeightPx 잠수부가 들어앉은 빈 띠의 화면 px 높이. 대기 크기가 이 안에
+   *   들어오게 이미 잡혀 있어도, 그 위에 얹는 흔들림(step() 의 bob)까지 빈 띠를
+   *   넘지 않게 여기서 안전 진폭을 미리 계산해 둔다(maxBobWorld).
    */
   place(
     anchor: { x: number; y: number },
@@ -76,12 +90,21 @@ export class Diver {
     screenH: number,
     cellPx: number,
     camZ: number,
+    bandHeightPx: number,
   ): void {
     this.homeScreen = anchor;
     const k = depthScale(camZ, HOME_Z);
     const p = screenToPlane(anchor.x, anchor.y, screenW, screenH, view);
     this.home.set(p.x * k, p.y * k, HOME_Z);
     this.homeScale = pxToWorld(cellPx * CELLS_TALL, view) * k;
+    this.maxBobWorld = maxIdleBobWorld(
+      cellPx * CELLS_TALL,
+      bandHeightPx,
+      MODEL_WIDTH_RATIO,
+      camZ,
+      HOME_Z,
+      view.pxPerWorld,
+    );
     if (this.mesh && !this.descent) this.mesh.scale.setScalar(this.homeScale);
   }
 
@@ -115,10 +138,15 @@ export class Diver {
     if (this.descent) return; // 탈출 중에는 경로가 위치를 쥔다
 
     const amp = 1 + this.danger * 1.8;
-    const bob = Math.sin(this.t * 0.9) * 0.06 + Math.sin(this.t * 0.37) * 0.035;
+    const bobRaw = Math.sin(this.t * 0.9) * 0.06 + Math.sin(this.t * 0.37) * 0.035;
+    // 빈 띠가 좁으면(보드가 화면 대부분을 차지하는 레이아웃) 위급 시 흔들림 폭이
+    // 보드를 침범할 수 있다 -- place() 가 잡아둔 상한으로 누른다.
+    const bob = Math.max(-this.maxBobWorld, Math.min(this.maxBobWorld, bobRaw * amp));
     const tilt = Math.sin(this.t * 0.6) * 0.09 + Math.sin(this.t * 0.23) * 0.05;
-    this.mesh.position.set(this.home.x, this.home.y + bob * amp, this.home.z);
-    this.mesh.rotation.set(0, Math.sin(this.t * 0.21) * 0.25, tilt * amp);
+    this.mesh.position.set(this.home.x, this.home.y + bob, this.home.z);
+    // 요(y 축 회전)는 세로축을 그대로 두므로 보드 침범과 무관하다 — amp 를 곱해
+    // "위급하면 속도·폭만 커진다" 는 규칙만 맞춘다.
+    this.mesh.rotation.set(0, Math.sin(this.t * 0.21) * 0.25 * amp, tilt * amp);
   }
 
   dispose(): void {
