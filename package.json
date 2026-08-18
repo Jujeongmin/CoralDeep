@@ -8,7 +8,7 @@
     "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test game/src/core/core.test.ts",
+    "test": "node --test game/src/core/core.test.ts game/src/render3d/projection.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
