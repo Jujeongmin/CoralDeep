@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs>
+
+<filter id="shc4" x="-30%" y="-30%" width="160%" height="170%">
+  <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#04141f" flood-opacity="0.55"/>
+</filter>
+
+<!-- 위쪽 베벨: 빛을 받는 면 -->
+<filter id="inc4" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="-2" dy="-7" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#ffffff" flood-opacity="0.9"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 아래쪽 그늘 -->
+<filter id="aoc4" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="2" dy="8" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="7" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#000814" flood-opacity="0.62"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 바닥 반사광(림라이트): 이게 있어야 물속에 떠 있는 입체로 보인다 -->
+<filter id="rimc4" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="0" dy="11" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="2.5" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#9fe8ff" flood-opacity="0.5"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+
+<radialGradient id="glossG" cx="0.5" cy="0.5" r="0.5">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+  <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.35"/>
+  <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="bodyc4" x1="0.2" y1="-0.05" x2="0.8" y2="1.05">
+  <stop offset="0" stop-color="#e2b6ff"/>
+  <stop offset="0.34" stop-color="#b473ee"/>
+  <stop offset="1" stop-color="#5f2a9c"/>
+</linearGradient>
+<clipPath id="clipc4"><path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="none"/></clipPath>
+</defs>
+<g filter="url(#shc4)">
+  <path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="url(#bodyc4)"/>
+</g>
+<g clip-path="url(#clipc4)">
+  <ellipse cx="64" cy="70" rx="32" ry="24" fill="#ffffff" opacity="0.12"/><ellipse cx="60" cy="58" rx="22" ry="15" fill="#ffe4ff" opacity="0.28"/><path d="M64 40Q37 62 19 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q46 62 34 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q55 62 49 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q64 62 64 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q73 62 79 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q82 62 94 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M64 40Q91 62 109 88" stroke="#f0c8ff" stroke-width="2.4" fill="none" opacity="0.35"/><path d="M28 78q36 22 72 0" stroke="#ffffff" stroke-width="3.5" fill="none" opacity="0.3"/><path d="M38 96q-8 14 -4 26" stroke="#e6b6ff" stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M51 96q-4 14 -2 26" stroke="#e6b6ff" stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M64 96q0 14 0 26" stroke="#e6b6ff" stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M77 96q4 14 2 26" stroke="#e6b6ff" stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M90 96q8 14 4 26" stroke="#e6b6ff" stroke-width="2.2" fill="none" opacity="0.4" stroke-linecap="round"/><ellipse cx="86" cy="80" rx="24" ry="18" fill="#3d1266" opacity="0.2" transform="rotate(-25 86 80)"/>
+  <g filter="url(#aoc4)"><path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="#000"/></g>
+  <g filter="url(#rimc4)"><path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="#000"/></g>
+  <g filter="url(#inc4)"><path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="#000"/></g>
+</g>
+<!-- 어두운 외곽선: 물 위에서도 타일이 또렷하게 떨어져 보인다 -->
+<path d="M16 74 a48 46 0 0 1 96 0 q0 18 -14 24 q-10 -12 -20 0 q-12 -12 -24 0 q-12 -12 -24 0 q-14 -6 -14 -24Z" fill="none" stroke="#05161f" stroke-opacity="0.55" stroke-width="4"/><ellipse cx="48" cy="46" rx="24" ry="14" fill="url(#glossG)" opacity="0.85" transform="rotate(-20 48 46)"/><ellipse cx="42" cy="41.8" rx="8.2" ry="5.9" fill="#ffffff" opacity="0.95" transform="rotate(-20 48 46)"/></svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><defs>
+<filter id="icShadow" x="-30%" y="-30%" width="170%" height="170%">
+  <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#03101a" flood-opacity="0.55"/>
+</filter>
+<filter id="icBevel" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="-2" dy="-3" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="3" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#fff6e4" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icAo" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="2.5" dy="4" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#100603" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icRim" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="0" dy="5" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="1.8" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#8fe4ff" flood-opacity="0.5"/>
+  <feComposite in2="i" operator="in"/>
+</filter><radialGradient id="c" cx="0.34" cy="0.28" r="0.85"><stop offset="0" stop-color="#d6fbff"/><stop offset="0.45" stop-color="#5cd2f5"/><stop offset="1" stop-color="#0d5f85"/></radialGradient></defs><g filter="url(#icShadow)"><path d="M32 5a27 27 0 1 1-0.1 0Z" fill="url(#c)" stroke="#1a0f08" stroke-width="3" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M32 5a27 27 0 1 1-0.1 0Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M32 5a27 27 0 1 1-0.1 0Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M32 5a27 27 0 1 1-0.1 0Z" fill="#000"/></g><path d="M13 32 25 22v7h14v-7l12 10-12 10v-7H25v7Z" fill="#ffffff" stroke="#1a0f08" stroke-width="2.4" stroke-linejoin="round"/><ellipse cx="23" cy="17" rx="8" ry="4.6" fill="#fff" opacity=".5" transform="rotate(-28 23 17)"/></svg>

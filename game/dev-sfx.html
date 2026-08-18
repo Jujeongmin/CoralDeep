@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>사운드 고르기</title>
+    <link rel="stylesheet" href="./src/style.css" />
+    <style>
+      body { padding: 16px; overflow: auto; position: static; height: auto; }
+      h2 { font-family: var(--font-plate); letter-spacing: .12em; color: var(--brass-hi); font-size: 14px; margin: 18px 0 8px; }
+      .row { display: flex; flex-wrap: wrap; gap: 6px; }
+      .row .btn { min-height: 38px; font-size: 12px; }
+      .note { color: var(--muted-foreground); font-size: 12px; margin: 0 0 4px; }
+      .combo { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <p class="note">
+      버튼을 눌러 들어보세요. 콤보 줄은 연쇄 1~6단계를 순서대로 재생합니다.<br />
+      마음에 드는 이름을 알려주시면 매치음 / win / lose 에 넣겠습니다.
+    </p>
+    <div id="host"></div>
+    <script type="module" src="./dev-sfx.ts"></script>
+  </body>
+</html>

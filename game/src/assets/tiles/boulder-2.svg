@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs>
+
+<filter id="shb2" x="-30%" y="-30%" width="160%" height="170%">
+  <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#04141f" flood-opacity="0.55"/>
+</filter>
+
+<!-- 위쪽 베벨: 빛을 받는 면 -->
+<filter id="inb2" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="-2" dy="-7" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#ffffff" flood-opacity="0.42"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 아래쪽 그늘 -->
+<filter id="aob2" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="2" dy="8" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="7" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#000814" flood-opacity="0.62"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 바닥 반사광(림라이트): 이게 있어야 물속에 떠 있는 입체로 보인다 -->
+<filter id="rimb2" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="0" dy="11" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="2.5" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#7fc4dd" flood-opacity="0.22"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+
+<radialGradient id="glossG" cx="0.5" cy="0.5" r="0.5">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+  <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.35"/>
+  <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="bodyb2" x1="0.2" y1="-0.05" x2="0.8" y2="1.05">
+  <stop offset="0" stop-color="#5d6d7c"/>
+  <stop offset="0.34" stop-color="#374350"/>
+  <stop offset="1" stop-color="#141b24"/>
+</linearGradient>
+<clipPath id="clipb2"><polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="none"/></clipPath>
+</defs>
+<g filter="url(#shb2)">
+  <polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="url(#bodyb2)"/>
+</g>
+<g clip-path="url(#clipb2)">
+  <polygon points="35.2,30.7 80.6,27.6 64,64 23.7,75.8" fill="#ffffff" opacity="0.13"/><polygon points="101.0,87.8 57.5,109.5 64,64 80.6,100.4" fill="#000814" opacity="0.22"/><circle cx="60.1" cy="59.5" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="60.1" cy="58.5" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="76.9" cy="65.5" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="76.9" cy="64.5" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="47.8" cy="75.7" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="47.8" cy="74.7" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="69.4" cy="37.5" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="69.4" cy="36.5" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="81.5" cy="93.1" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="81.5" cy="92.1" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="24.7" cy="52.4" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="24.7" cy="51.4" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="69.4" cy="61.4" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="69.4" cy="60.4" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="59.3" cy="76.1" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="59.3" cy="75.1" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="56.8" cy="45.4" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="56.8" cy="44.4" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="88.2" cy="75.9" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="88.2" cy="74.9" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="31.4" cy="73.5" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="31.4" cy="72.5" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="85.2" cy="28.9" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="85.2" cy="27.9" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="65.2" cy="69.9" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="65.2" cy="68.9" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="53.5" cy="56.3" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="53.5" cy="55.3" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="83.9" cy="61.7" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="83.9" cy="60.7" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="46.3" cy="84.4" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="46.3" cy="83.4" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="63.1" cy="30.0" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="63.1" cy="29.0" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="92.5" cy="93.4" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="92.5" cy="92.4" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="58.0" cy="63.7" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="58.0" cy="62.7" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="74.1" cy="55.8" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="74.1" cy="54.8" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="61.1" cy="83.8" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="61.1" cy="82.8" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="48.8" cy="41.7" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="48.8" cy="40.7" r="2.6" fill="#c8d6e2" opacity="0.16"/><circle cx="97.1" cy="71.7" r="3.6" fill="#0f1720" opacity="0.28"/><circle cx="97.1" cy="70.7" r="3.6" fill="#c8d6e2" opacity="0.16"/><circle cx="28.3" cy="84.1" r="4.6" fill="#0f1720" opacity="0.28"/><circle cx="28.3" cy="83.1" r="4.6" fill="#c8d6e2" opacity="0.16"/><circle cx="65.9" cy="58.3" r="1.6" fill="#0f1720" opacity="0.28"/><circle cx="65.9" cy="57.3" r="1.6" fill="#c8d6e2" opacity="0.16"/><circle cx="69.4" cy="75.8" r="2.6" fill="#0f1720" opacity="0.28"/><circle cx="69.4" cy="74.8" r="2.6" fill="#c8d6e2" opacity="0.16"/><path d="M30 46 L58 62 L48 92" stroke="#0b1219" stroke-width="3" fill="none" opacity="0.35"/><path d="M96 42 L74 66 L88 96" stroke="#0b1219" stroke-width="2.5" fill="none" opacity="0.3"/><g opacity="0.95">
+    <path d="M40 34 q-8 -16 2 -24 q8 -6 12 4 q6 -12 14 -4 q8 8 -2 22Z" fill="#ff7fa8"/>
+    <path d="M84 40 q-4 -14 6 -20 q9 -5 11 6 q4 -8 10 -1 q6 8 -3 17Z" fill="#ffab5e"/>
+    <path d="M44 30 v-10 M52 28 v-12 M60 30 v-9" stroke="#ffd2e2" stroke-width="2.5" opacity="0.6"/>
+  </g>
+  <g filter="url(#aob2)"><polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="#000"/></g>
+  <g filter="url(#rimb2)"><polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="#000"/></g>
+  <g filter="url(#inb2)"><polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="#000"/></g>
+</g>
+<!-- 어두운 외곽선: 물 위에서도 타일이 또렷하게 떨어져 보인다 -->
+<polygon points="104.7,64.0 105.1,90.4 83.2,106.0 57.9,106.4 30.3,102.9 26.4,75.0 13.3,49.1 37.5,33.4 57.0,15.3 83.0,22.3 100.3,40.7" fill="none" stroke="#05161f" stroke-opacity="0.55" stroke-width="4"/></svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><defs>
+<filter id="icShadow" x="-30%" y="-30%" width="170%" height="170%">
+  <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#03101a" flood-opacity="0.55"/>
+</filter>
+<filter id="icBevel" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="-2" dy="-3" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="3" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#fff6e4" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icAo" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="2.5" dy="4" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#100603" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icRim" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="0" dy="5" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="1.8" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#8fe4ff" flood-opacity="0.5"/>
+  <feComposite in2="i" operator="in"/>
+</filter><linearGradient id="hp" x1="0" y1="0" x2="1" y2="0.1"><stop offset="0" stop-color="#5d4526"/><stop offset="0.3" stop-color="#e0bb7f"/><stop offset="0.68" stop-color="#a2763c"/><stop offset="1" stop-color="#5d4526"/></linearGradient><linearGradient id="hs" x1="0" y1="0" x2="1" y2="0.1"><stop offset="0" stop-color="#42525e"/><stop offset="0.3" stop-color="#f2f8fc"/><stop offset="0.68" stop-color="#8fa3b1"/><stop offset="1" stop-color="#42525e"/></linearGradient></defs><g transform="rotate(28 32 32)"><g filter="url(#icShadow)"><path d="M28 26h8v30q0 4 -4 4t-4 -4Z" fill="url(#hp)" stroke="#1a0f08" stroke-width="2.6" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M28 26h8v30q0 4 -4 4t-4 -4Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M28 26h8v30q0 4 -4 4t-4 -4Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M28 26h8v30q0 4 -4 4t-4 -4Z" fill="#000"/></g><g filter="url(#icShadow)"><path d="M32 2 47 26h-6l-3 5h-12l-3 -5h-6Z" fill="url(#hs)" stroke="#1a0f08" stroke-width="2.8" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M32 2 47 26h-6l-3 5h-12l-3 -5h-6Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M32 2 47 26h-6l-3 5h-12l-3 -5h-6Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M32 2 47 26h-6l-3 5h-12l-3 -5h-6Z" fill="#000"/></g><g filter="url(#icShadow)"><path d="M17 26 8 14q9 -1 13 6Z" fill="url(#hs)" stroke="#1a0f08" stroke-width="2.4" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M17 26 8 14q9 -1 13 6Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M17 26 8 14q9 -1 13 6Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M17 26 8 14q9 -1 13 6Z" fill="#000"/></g><g filter="url(#icShadow)"><path d="M47 26 56 14q-9 -1 -13 6Z" fill="url(#hs)" stroke="#1a0f08" stroke-width="2.4" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M47 26 56 14q-9 -1 -13 6Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M47 26 56 14q-9 -1 -13 6Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M47 26 56 14q-9 -1 -13 6Z" fill="#000"/></g><rect x="25" y="26" width="14" height="7" rx="3" fill="#e8b756" stroke="#1a0f08" stroke-width="2.4"/></g></svg>

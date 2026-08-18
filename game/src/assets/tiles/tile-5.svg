@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><defs>
+
+<filter id="shc5" x="-30%" y="-30%" width="160%" height="170%">
+  <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#04141f" flood-opacity="0.55"/>
+</filter>
+
+<!-- 위쪽 베벨: 빛을 받는 면 -->
+<filter id="inc5" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="-2" dy="-7" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#ffffff" flood-opacity="0.9"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 아래쪽 그늘 -->
+<filter id="aoc5" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="2" dy="8" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="7" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#000814" flood-opacity="0.62"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+<!-- 바닥 반사광(림라이트): 이게 있어야 물속에 떠 있는 입체로 보인다 -->
+<filter id="rimc5" x="-20%" y="-20%" width="140%" height="140%">
+  <feOffset dx="0" dy="11" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="2.5" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="inner"/>
+  <feFlood flood-color="#9fe8ff" flood-opacity="0.5"/>
+  <feComposite in2="inner" operator="in"/>
+</filter>
+
+<radialGradient id="glossG" cx="0.5" cy="0.5" r="0.5">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+  <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.35"/>
+  <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="bodyc5" x1="0.2" y1="-0.05" x2="0.8" y2="1.05">
+  <stop offset="0" stop-color="#ffffff"/>
+  <stop offset="0.34" stop-color="#f0e0c8"/>
+  <stop offset="1" stop-color="#a88f6a"/>
+</linearGradient>
+<clipPath id="clipc5"><path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="none"/></clipPath>
+</defs>
+<g filter="url(#shc5)">
+  <path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="url(#bodyc5)"/>
+</g>
+<g clip-path="url(#clipc5)">
+  <path d="M78 26 a36 29.52 0 1 1 -22.32 43.92" stroke="#8d6a3a" stroke-width="3.4" fill="none" opacity="0.3"/><path d="M78 24 a36 29.52 0 1 1 -22.32 43.92" stroke="#fff6e6" stroke-width="1.5" fill="none" opacity="0.4"/><path d="M73 33 a29 23.779999999999998 0 1 1 -17.98 35.38" stroke="#8d6a3a" stroke-width="3.4" fill="none" opacity="0.3"/><path d="M73 31 a29 23.779999999999998 0 1 1 -17.98 35.38" stroke="#fff6e6" stroke-width="1.5" fill="none" opacity="0.4"/><path d="M68 40 a22 18.04 0 1 1 -13.64 26.84" stroke="#8d6a3a" stroke-width="3.4" fill="none" opacity="0.3"/><path d="M68 38 a22 18.04 0 1 1 -13.64 26.84" stroke="#fff6e6" stroke-width="1.5" fill="none" opacity="0.4"/><path d="M63 47 a15 12.299999999999999 0 1 1 -9.3 18.3" stroke="#8d6a3a" stroke-width="3.4" fill="none" opacity="0.3"/><path d="M63 45 a15 12.299999999999999 0 1 1 -9.3 18.3" stroke="#fff6e6" stroke-width="1.5" fill="none" opacity="0.4"/><path d="M58 54 a8 6.56 0 1 1 -4.96 9.76" stroke="#8d6a3a" stroke-width="3.4" fill="none" opacity="0.3"/><path d="M58 52 a8 6.56 0 1 1 -4.96 9.76" stroke="#fff6e6" stroke-width="1.5" fill="none" opacity="0.4"/><path d="M73.9 45.5L91.4 23.5" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M78.2 50.6L103.0 37.7" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M80.0 57.0L107.9 55.4" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M79.0 63.6L105.2 73.5" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M75.4 69.3L95.3 88.9" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M69.8 72.9L79.9 99.0" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M63.2 74.0L61.8 101.9" stroke="#a8794a" stroke-width="3" opacity="0.2" stroke-linecap="round"/><path d="M40 84q14 -10 28 2q-6 18 -22 20q-12 -6 -6 -22Z" fill="#6b4a24" opacity="0.45"/><path d="M43 86q12 -8 23 2" stroke="#fff6e6" stroke-width="2.4" fill="none" opacity="0.45" stroke-linecap="round"/><ellipse cx="92" cy="80" rx="24" ry="20" fill="#5c4222" opacity="0.18" transform="rotate(-25 92 80)"/>
+  <g filter="url(#aoc5)"><path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="#000"/></g>
+  <g filter="url(#rimc5)"><path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="#000"/></g>
+  <g filter="url(#inc5)"><path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="#000"/></g>
+</g>
+<!-- 어두운 외곽선: 물 위에서도 타일이 또렷하게 떨어져 보인다 -->
+<path d="M96 18 q14 26 6 54 q-8 30 -34 38 q-28 8 -44 -10 q-14 -16 -2 -32 q8 -11 22 -10 q-8 -12 2 -20 q10 -8 22 -2 q-4 -14 8 -20 q12 -6 20 2Z" fill="none" stroke="#05161f" stroke-opacity="0.55" stroke-width="4"/><ellipse cx="56" cy="44" rx="22" ry="12" fill="url(#glossG)" opacity="0.85" transform="rotate(-20 56 44)"/><ellipse cx="50.5" cy="40.4" rx="7.5" ry="5.0" fill="#ffffff" opacity="0.95" transform="rotate(-20 56 44)"/></svg>

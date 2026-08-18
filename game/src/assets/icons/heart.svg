@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><defs>
+<filter id="icShadow" x="-30%" y="-30%" width="170%" height="170%">
+  <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#03101a" flood-opacity="0.55"/>
+</filter>
+<filter id="icBevel" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="-2" dy="-3" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="3" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#fff6e4" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icAo" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="2.5" dy="4" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="4" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#100603" flood-opacity="0.55"/>
+  <feComposite in2="i" operator="in"/>
+</filter>
+<filter id="icRim" x="-30%" y="-30%" width="160%" height="160%">
+  <feOffset dx="0" dy="5" in="SourceAlpha" result="o"/>
+  <feGaussianBlur in="o" stdDeviation="1.8" result="b"/>
+  <feComposite in="SourceAlpha" in2="b" operator="out" result="i"/>
+  <feFlood flood-color="#8fe4ff" flood-opacity="0.5"/>
+  <feComposite in2="i" operator="in"/>
+</filter><radialGradient id="h" cx="0.34" cy="0.26" r="0.9"><stop offset="0" stop-color="#ffd4e6"/><stop offset="0.4" stop-color="#ff7aad"/><stop offset="0.8" stop-color="#d93a76"/><stop offset="1" stop-color="#8d1f47"/></radialGradient></defs><g filter="url(#icShadow)"><path d="M32 56C16 44 6 35.5 6 25.5 6 17 12.8 11 20.6 11c4.9 0 9.1 2.5 11.4 6.2C34.3 13.5 38.5 11 43.4 11 51.2 11 58 17 58 25.5 58 35.5 48 44 32 56Z" fill="url(#h)" stroke="#1a0f08" stroke-width="3" stroke-linejoin="round"/></g><g filter="url(#icBevel)"><path d="M32 56C16 44 6 35.5 6 25.5 6 17 12.8 11 20.6 11c4.9 0 9.1 2.5 11.4 6.2C34.3 13.5 38.5 11 43.4 11 51.2 11 58 17 58 25.5 58 35.5 48 44 32 56Z" fill="#000"/></g><g filter="url(#icAo)"><path d="M32 56C16 44 6 35.5 6 25.5 6 17 12.8 11 20.6 11c4.9 0 9.1 2.5 11.4 6.2C34.3 13.5 38.5 11 43.4 11 51.2 11 58 17 58 25.5 58 35.5 48 44 32 56Z" fill="#000"/></g><g filter="url(#icRim)"><path d="M32 56C16 44 6 35.5 6 25.5 6 17 12.8 11 20.6 11c4.9 0 9.1 2.5 11.4 6.2C34.3 13.5 38.5 11 43.4 11 51.2 11 58 17 58 25.5 58 35.5 48 44 32 56Z" fill="#000"/></g><path d="M32 20q0 6 -1 11" stroke="#8d1f47" stroke-width="3" fill="none" stroke-linecap="round" opacity=".35"/><ellipse cx="21" cy="24" rx="7" ry="4.6" fill="#fff" opacity=".62" transform="rotate(-32 21 24)"/><circle cx="19" cy="22" r="2.4" fill="#fff"/></svg>
