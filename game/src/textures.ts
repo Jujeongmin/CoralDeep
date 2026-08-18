@@ -2,23 +2,23 @@
 //
 // Poly Haven(CC0) 4k 디퓨즈를 tools 하네스에서 축소 + 심해 색보정해 구운 결과물이다.
 // 원본 라이선스: CC0 (https://polyhaven.com/textures)
-//   gravel  ← coral_gravel
 //   rock    ← dark_rock_02
 //   boulder ← rock_boulder_cracked
 //   sand    ← coast_sand_05
 //   coral   ← coral_fort_wall_01
 //
 // 전부 심리스라 그냥 반복 패턴으로 깔면 된다.
-// 절차적으로 찍던 자갈·바위 무늬 대신 이걸 깔아야 '게임 그래픽'이 아니라 실물로 읽힌다.
+// 절차적으로 찍던 바위 무늬 대신 이걸 깔아야 '게임 그래픽'이 아니라 실물로 읽힌다.
+//
+// gravel(coral_gravel) 은 한때 2D GravelField 가 썼지만, Task 3 에서 자갈 해저가
+// 3D InstancedMesh(정점 컬러 + 노이즈)로 대체되며 지웠다. 남은 소비자가 없어 여기서도 지운다.
 
 import boulderTex from './assets/textures/boulder.jpg';
 import coralTex from './assets/textures/coral.jpg';
-import gravelTex from './assets/textures/gravel.jpg';
 import rockTex from './assets/textures/rock.jpg';
 import sandTex from './assets/textures/sand.jpg';
 
 const URLS = {
-  gravel: gravelTex,
   rock: rockTex,
   boulder: boulderTex,
   sand: sandTex,
