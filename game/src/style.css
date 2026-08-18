@@ -1202,7 +1202,17 @@ body {
 
 .level-screen .stage3d {
   position: absolute;
-  inset: 0;
+  /* absolute 요소의 컨테이닝 블록은 .level-screen 의 padding box 다 (콘텐츠 박스가 아니다).
+     board-canvas 는 같은 .level-screen 의 콘텐츠 박스(패딩 뺀 영역)를 꽉 채우는 일반 흐름
+     요소라서, top/left 만 두고 폭을 auto 로 두면 두 캔버스의 폭이 좌우 패딩(8px)만큼
+     어긋난다. 게다가 canvas 는 대체 요소라 width:auto 는 (0,0) 이 아니라 캔버스의
+     width/height 속성(버퍼 크기)을 그대로 쓴다 — inset 만으로는 절대 안 풀린다.
+     그래서 폭/높이를 calc 로 직접 못박는다. .level-screen 의 padding: 0 8px 값과
+     맞춰야 두 캔버스가 같은 박스를 공유한다. */
+  top: 0;
+  left: 8px;
+  width: calc(100% - 16px);
+  height: 100%;
   z-index: 2;
   pointer-events: none;
 }
