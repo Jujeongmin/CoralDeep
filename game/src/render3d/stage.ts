@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 
 import { depthMood } from '../render/depth.ts';
+import { Drift } from './particles.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
 import { Seafloor, type HoleBox } from './seafloor.ts';
 import type { BoardRect, DescentPoint, SceneView, Stage } from './types.ts';
@@ -33,6 +34,7 @@ export class Stage3D implements Stage {
   private mood = depthMood(0);
   private seafloor = new Seafloor(this.scene);
   private waterVolume = new WaterVolume(this.scene);
+  private drift = new Drift(this.scene);
   private lights: THREE.Light[] = [];
 
   constructor(
@@ -89,6 +91,7 @@ export class Stage3D implements Stage {
     this.view = planeView(this.w, this.h, FOV, CAM_Z);
     if (this.board) this.setBoardRect(this.board);
     this.waterVolume.setMood(this.mood, this.clearBand(), CAM_Z);
+    this.drift.setMood(this.mood, this.view);
   }
 
   /**
@@ -125,6 +128,20 @@ export class Stage3D implements Stage {
       Math.round(this.depth * 1000) + 7,
       CAM_Z,
     );
+    // 입자 셰이더가 쓰는 구멍 경계는 화면 NDC(-1..1) 다 -- 캔버스 로컬 px 사각형을
+    // 그대로 비율 변환한다(y 는 화면 아래쪽이 0 이므로 뒤집는다). 입자는 z=0 평면이
+    // 아닌 여러 깊이에 떠 있어 world 좌표로는 못 비교하므로(particles.ts 주석 참고),
+    // 여기서는 world 로 가지 않고 바로 NDC 로 넘긴다.
+    const left = cx - r.w / 2;
+    const top = cy - r.h / 2;
+    const right = cx + r.w / 2;
+    const bottom = cy + r.h / 2;
+    this.drift.setBoardRectNdc(
+      (left / this.w) * 2 - 1,
+      1 - (bottom / this.h) * 2,
+      (right / this.w) * 2 - 1,
+      1 - (top / this.h) * 2,
+    );
   }
 
   setView(_v: SceneView): void {}
@@ -144,6 +161,7 @@ export class Stage3D implements Stage {
   step(dt: number): void {
     this.seafloor.step(dt);
     this.waterVolume.step(dt);
+    this.drift.step(dt);
   }
 
   render(): void {
@@ -153,6 +171,7 @@ export class Stage3D implements Stage {
   dispose(): void {
     this.seafloor.dispose();
     this.waterVolume.dispose();
+    this.drift.dispose();
     for (const l of this.lights) this.scene.remove(l);
     this.scene.clear();
     this.renderer.dispose();
