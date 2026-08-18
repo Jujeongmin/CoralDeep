@@ -28,6 +28,21 @@ const FOV = 45;
 /** predators.ts rebuild() 의 최대 튜브 반지름 (0.28 + danger*0.1, danger=1) */
 const MAX_TUBE_RADIUS = 0.38;
 
+/**
+ * predators.ts 의 EEL_HEAD_REACH — 곰치 머리(주둥이·눈·아래턱·이빨)가 앵커(튜브
+ * 끝 제어점, controlPoints() 의 마지막 점)에서 가장 멀리 뻗는 거리. 아래턱 앞쪽
+ * 아래 모서리가 가장 멀다(predators.ts EEL_HEAD_REACH 주석의 계산과 같다). 머리는
+ * 튜브 끝에만 붙으므로 마지막 제어점에서만 이 반지름을 쓴다 — 나머지 세 점은
+ * 튜브 자체의 반지름(MAX_TUBE_RADIUS)만으로 충분하다.
+ */
+const EEL_HEAD_REACH = 0.5;
+
+/**
+ * 아귀 머리(주둥이+눈)의 최대 반지름 — predators.ts 주석대로 0.222 로
+ * MAX_TUBE_RADIUS(0.38) 보다 작다. 튜브 자체가 이미 검증하는 범위 안이므로
+ * 아귀는 반지름을 따로 늘리지 않는다(코드에도 상수를 안 둔 이유와 같다).
+ */
+
 /** projection.ts 의 planeView() 와 같은 식 — worldW 는 y 경계 계산에 안 쓰여 생략한다 */
 const WORLD_H = 2 * Math.tan(((FOV * Math.PI) / 180) / 2) * CAM_Z;
 
@@ -73,18 +88,27 @@ for (const kind of KINDS) {
   for (const danger of [0, 1]) {
     test(`${kind}: danger=${danger} 에서 몸 전체가 보드 위 빈 띠 경계를 넘지 않는다`, () => {
       const pts = controlPoints(kind, danger);
-      for (const [x, y, z] of pts) {
+      pts.forEach(([x, y, z], i) => {
         // 제어점(x, y, z, z=0 기준)이 실제로는 z 깊이에 있으므로 화면에 찍히는
         // 자리·반지름은 projectPebble() 로 구한다 — seafloor.ts 가 자갈 알의 구멍
         // 침범을 판정할 때 쓰는 것과 같은 함수다.
-        const proj = projectPebble(x, y, MAX_TUBE_RADIUS, z, CAM_Z);
+        //
+        // 곰치는 마지막 제어점(튜브 끝, i === pts.length-1)에 머리(주둥이·눈·턱·
+        // 이빨)가 붙어 튜브 반지름보다 더 멀리 뻗는다 — 그 점만 EEL_HEAD_REACH 로
+        // 검증한다(predators.ts 의 buildEelHead()/EEL_HEAD_REACH 주석 참고). 나머지
+        // 제어점과 다른 종은 튜브 반지름(MAX_TUBE_RADIUS)만으로 충분하다(아귀 머리는
+        // 0.222 로 이미 그 안에 들어간다 — 위 주석 참고).
+        const isEelHead = kind === 'eel' && i === pts.length - 1;
+        const r = isEelHead ? EEL_HEAD_REACH : MAX_TUBE_RADIUS;
+        const proj = projectPebble(x, y, r, z, CAM_Z);
         const bottomEdge = proj.y - proj.r;
         assert.ok(
           bottomEdge > BOARD_TOP_WORLD_Y,
-          `${kind} 제어점(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})의 몸통 아래쪽 ` +
-            `경계(${bottomEdge.toFixed(3)})가 빈 띠 경계(${BOARD_TOP_WORLD_Y.toFixed(3)})를 넘었다`,
+          `${kind} 제어점(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})의 ` +
+            `${isEelHead ? '머리' : '몸통'} 아래쪽 경계(${bottomEdge.toFixed(3)})가 ` +
+            `빈 띠 경계(${BOARD_TOP_WORLD_Y.toFixed(3)})를 넘었다`,
         );
-      }
+      });
     });
   }
 }

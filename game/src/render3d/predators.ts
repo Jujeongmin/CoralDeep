@@ -20,10 +20,54 @@ import type { PredatorKind } from '../levels.ts';
 const TUBE_SEG = 24;
 const TUBE_RADIAL = 6;
 
+// 곰치 머리 — 튜브 끝(제어점 3, 몸을 뻗을수록 카메라 쪽으로 나오는 쪽)에 붙는
+// 저폴리 부품 몇 개. 전부 head 그룹의 로컬 좌표(오른쪽=+x, 위=+y, 접선 방향=+z)다.
+/** 주둥이(스냅) 반지름과, 그 중심이 앵커(튜브 끝점)에서 접선 방향으로 얼마나 앞인가 */
+const EEL_SNOUT_RADIUS = 0.24;
+const EEL_SNOUT_FORWARD = 0.16;
+/** 눈 반지름과 좌우 대칭 오프셋(오른쪽 눈 기준, 왼쪽은 x 부호만 뒤집는다) */
+const EEL_EYE_RADIUS = 0.05;
+const EEL_EYE_OFFSET = new THREE.Vector3(0.15, 0.1, 0.22);
+/** 아래턱 상자 — 앞으로 내밀어 벌어진 턱을 암시한다 */
+const EEL_JAW_SIZE = new THREE.Vector3(0.14, 0.05, 0.22);
+const EEL_JAW_OFFSET = new THREE.Vector3(0, -0.12, 0.34);
+/** 이빨 — 아래턱 위에 돋은 작은 원뿔 두 개 */
+const EEL_TOOTH_RADIUS = 0.03;
+const EEL_TOOTH_HEIGHT = 0.07;
+const EEL_TOOTH_X = 0.045;
+
+// 머리 부품(주둥이·눈·턱·이빨) 전체가 앵커(head 그룹 원점 = 튜브 끝 제어점)에서
+// 얼마나 멀리까지 뻗는가(EEL_HEAD_REACH = 0.5) — predators.test.ts 가 이 값을
+// 그대로 옮겨 적어 danger=1 에서도 보드 사각형(빈 띠)을 침범하지 않는지
+// 검증한다(파일 상단 클래스 주석과 같은 이유 — parameter property 때문에 두
+// 파일이 상수를 각자 들고 있다). 여기서는 상수로 안 두고 주석에만 남긴다(런타임
+// 코드에서 안 쓰이는 상수는 noUnusedLocals 에 걸린다). 가장 먼 점은 아래턱의
+// 앞쪽 아래 모서리다:
+//   forward = EEL_JAW_OFFSET.z + EEL_JAW_SIZE.z/2 = 0.34 + 0.11 = 0.45
+//   down    = |EEL_JAW_OFFSET.y| + EEL_JAW_SIZE.y/2 = 0.12 + 0.025 = 0.145
+//   side    = EEL_JAW_SIZE.x/2 = 0.07
+//   reach   = sqrt(0.45² + 0.145² + 0.07²) ≈ 0.478 -> 여유를 두고 0.5 로 올린다.
+// (주둥이·눈·이빨은 각각 계산해도 이보다 작다 — 주둥이 0.40, 눈 0.334, 이빨 0.382.)
+
+// 아귀 머리 — 유인등(lure)만으로는 '튜브에 매달린 구슬'로 읽혀 몸통과 머리가
+// 안 갈린다. 작은 주둥이 덩어리 + 눈만 더해 머리 윤곽을 준다(턱·이빨은 아귀
+// 특징이 아니라 곰치 쪽에만 둔다). 유인등과 같은 앵커(튜브 끝)를 쓴다.
+const ANGLER_SNOUT_RADIUS = 0.16;
+const ANGLER_SNOUT_FORWARD = 0.05;
+const ANGLER_EYE_RADIUS = 0.04;
+const ANGLER_EYE_OFFSET = new THREE.Vector3(0.1, 0.06, 0.14);
+// 아귀 머리 최대 반지름(앵커 기준) — 주둥이 forward+radius = 0.05+0.16 = 0.21,
+// 눈 |offset|+radius ≈ 0.222. 튜브 반지름 상한(predators.test.ts 의
+// MAX_TUBE_RADIUS = 0.38)보다 작으므로 튜브가 이미 검증하는 범위 안에 들어간다 —
+// EEL_HEAD_REACH 와 달리 테스트를 따로 늘릴 필요가 없다.
+
 export class Predators {
   private group = new THREE.Group();
   private body: THREE.Mesh;
   private lure: THREE.Mesh | null = null;
+  private head: THREE.Group | null = null;
+  private headGeoms: THREE.BufferGeometry[] = [];
+  private headMats: THREE.Material[] = [];
   private curve: THREE.CatmullRomCurve3;
   private mat: THREE.MeshLambertMaterial;
   private lureMat: THREE.MeshBasicMaterial | null = null;
@@ -46,8 +90,94 @@ export class Predators {
       this.lureMat = new THREE.MeshBasicMaterial({ color: 0xbfe9ff });
       this.lure = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), this.lureMat);
       this.group.add(this.lure);
+      this.head = this.buildAnglerHead();
+      this.group.add(this.head);
+    } else if (kind === 'eel') {
+      this.head = this.buildEelHead();
+      this.group.add(this.head);
     }
+    // 촉수는 몸통을 끝내 안 보여주는 게 핵심이라(파일 상단 주석) 머리를 안 만든다.
     scene.add(this.group);
+  }
+
+  /**
+   * 곰치 머리 — 주둥이(스냅) + 눈 두 개 + 아래턱 + 이빨 두 개. 전부 저폴리
+   * primitive 몇 개라 삼각형 172개, 드로우콜 6개(스냅1 · 눈2 · 턱1 · 이빨2)뿐이다.
+   * 매 프레임 rebuild() 가 이 그룹 전체를 튜브 끝 제어점에 옮기고 접선으로
+   * 돌리기만 한다 — 지오메트리는 여기서 한 번만 만든다(프레임마다 재할당 금지).
+   */
+  private buildEelHead(): THREE.Group {
+    const g = new THREE.Group();
+
+    // 주둥이 — 몸통 재질(this.mat)을 그대로 써서 setMood() 의 깊이별 어둡기를
+    // 자동으로 같이 받는다(따로 관리할 재질을 늘리지 않는다).
+    const snoutGeom = new THREE.SphereGeometry(EEL_SNOUT_RADIUS, 8, 6);
+    const snout = new THREE.Mesh(snoutGeom, this.mat);
+    snout.position.set(0, 0, EEL_SNOUT_FORWARD);
+    g.add(snout);
+    this.headGeoms.push(snoutGeom);
+
+    // 눈 — 항상 진하게, 물빛에 안 묻히게 MeshBasicMaterial(비조명)로 둔다.
+    const eyeGeom = new THREE.SphereGeometry(EEL_EYE_RADIUS, 6, 4);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
+    const eyeR = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeR.position.copy(EEL_EYE_OFFSET);
+    const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeL.position.set(-EEL_EYE_OFFSET.x, EEL_EYE_OFFSET.y, EEL_EYE_OFFSET.z);
+    g.add(eyeR, eyeL);
+    this.headGeoms.push(eyeGeom);
+    this.headMats.push(eyeMat);
+
+    // 아래턱 — 몸통 재질과 같은 톤이면 눈에 안 띄므로 살짝 밝은 안쪽 색을 준다.
+    const jawGeom = new THREE.BoxGeometry(EEL_JAW_SIZE.x, EEL_JAW_SIZE.y, EEL_JAW_SIZE.z);
+    const jawMat = new THREE.MeshLambertMaterial({ color: 0x8a9a95, flatShading: true });
+    const jaw = new THREE.Mesh(jawGeom, jawMat);
+    jaw.position.copy(EEL_JAW_OFFSET);
+    g.add(jaw);
+    this.headGeoms.push(jawGeom);
+    this.headMats.push(jawMat);
+
+    // 이빨 — 아래턱 윗면에서 위로 돋은 작은 원뿔 두 개(벌어진 턱의 암시).
+    const toothGeom = new THREE.ConeGeometry(EEL_TOOTH_RADIUS, EEL_TOOTH_HEIGHT, 3);
+    const toothMat = new THREE.MeshBasicMaterial({ color: 0xe9ecec });
+    const toothY = EEL_JAW_OFFSET.y + EEL_JAW_SIZE.y / 2 + EEL_TOOTH_HEIGHT / 2;
+    const toothR = new THREE.Mesh(toothGeom, toothMat);
+    toothR.position.set(EEL_TOOTH_X, toothY, EEL_JAW_OFFSET.z);
+    const toothL = new THREE.Mesh(toothGeom, toothMat);
+    toothL.position.set(-EEL_TOOTH_X, toothY, EEL_JAW_OFFSET.z);
+    g.add(toothR, toothL);
+    this.headGeoms.push(toothGeom);
+    this.headMats.push(toothMat);
+
+    return g;
+  }
+
+  /**
+   * 아귀 머리 — 주둥이 덩어리 + 눈 두 개뿐이다(턱·이빨은 곰치만의 특징으로 남긴다).
+   * 유인등(lure)이 이미 앞쪽에 떠 있어 '이게 머리 방향이다'는 알려주지만, 몸통이
+   * 시작부터 끝까지 굵기만 다른 튜브라 몸통과 머리가 안 갈리던 문제(물고기가 아니라
+   * 관에 매달린 구슬처럼 보임)를 이 두 부품으로 고친다.
+   */
+  private buildAnglerHead(): THREE.Group {
+    const g = new THREE.Group();
+
+    const snoutGeom = new THREE.SphereGeometry(ANGLER_SNOUT_RADIUS, 6, 4);
+    const snout = new THREE.Mesh(snoutGeom, this.mat);
+    snout.position.set(0, 0, ANGLER_SNOUT_FORWARD);
+    g.add(snout);
+    this.headGeoms.push(snoutGeom);
+
+    const eyeGeom = new THREE.SphereGeometry(ANGLER_EYE_RADIUS, 6, 4);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
+    const eyeR = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeR.position.copy(ANGLER_EYE_OFFSET);
+    const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeL.position.set(-ANGLER_EYE_OFFSET.x, ANGLER_EYE_OFFSET.y, ANGLER_EYE_OFFSET.z);
+    g.add(eyeR, eyeL);
+    this.headGeoms.push(eyeGeom);
+    this.headMats.push(eyeMat);
+
+    return g;
   }
 
   /**
@@ -137,6 +267,18 @@ export class Predators {
     next.dispose();
 
     if (this.lure) this.lure.position.copy(this.curve.getPoint(1));
+
+    // 머리는 튜브 끝 제어점(t=1)에 붙어 같이 뻗어 나온다 — 곰치는 뻗을수록,
+    // 아귀는 헤엄쳐 올수록 머리가 몸통 끝을 그대로 따라간다. 접선 방향으로
+    // 돌려야 주둥이가 진행 방향을 보므로, lookAt 의 기본 규약(로컬 -z 가 목표를
+    // 본다)에 맞춰 목표점을 tip - tangent 로 잡는다(그래야 로컬 +z, 즉 머리
+    // 부품들이 쓰는 '앞' 축이 tangent 방향을 향한다).
+    if (this.head) {
+      const tip = this.curve.getPoint(1);
+      const tangent = this.curve.getTangent(1);
+      this.head.position.copy(tip);
+      this.head.lookAt(tangent.multiplyScalar(-1).add(tip));
+    }
   }
 
   step(dt: number): void {
@@ -150,5 +292,9 @@ export class Predators {
     this.mat.dispose();
     this.lure?.geometry.dispose();
     this.lureMat?.dispose();
+    // 머리 부품 중 주둥이는 this.mat(몸통 재질)을 그대로 쓰므로 위에서 이미
+    // 해제됐다 — headGeoms/headMats 는 머리 전용으로 새로 만든 것들만 담는다.
+    for (const geom of this.headGeoms) geom.dispose();
+    for (const mat of this.headMats) mat.dispose();
   }
 }
