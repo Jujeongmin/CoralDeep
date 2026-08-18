@@ -25,7 +25,7 @@ export interface AdCounter {
  *  - 생명:     hearts, heartsAt, infiniteHeartsUntil
  *  - 인벤토리: boosters
  *  - 주기 보상: dailyClaimedDay, dailyStreak, wheelFreeDay
- *  - 광고 제한: adCounters, levelEndCount   ← 계정에 붙어야 상한 우회가 안 된다
+ *  - 광고 제한: adCounters   ← 계정에 붙어야 상한 우회가 안 된다
  *  - 사용자:   settings, nickname, accountId
  */
 /**
@@ -65,8 +65,6 @@ export interface SaveData {
   /** 저금통에 쌓인 진주 */
   piggy: number;
   adCounters: Record<string, AdCounter>;
-  /** 전면 광고 카운터: 레벨 종료 횟수 */
-  levelEndCount: number;
   /**
    * 소리는 배경음과 효과음을 따로 잡는다 (0..1).
    *
@@ -98,7 +96,6 @@ export function defaultSave(): SaveData {
     wheelFreeDay: '',
     piggy: 0,
     adCounters: {},
-    levelEndCount: 0,
     // 배경음은 효과음보다 낮게 깔아야 효과음이 묻히지 않는다
     settings: { bgmVolume: 0.7, sfxVolume: 1, haptics: true, lang: 'ko' },
     nickname: '',

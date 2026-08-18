@@ -1,6 +1,6 @@
 // DOM 헬퍼 · 토스트 · 모달 · 광고 버튼.
 
-import { showInterstitial, showRewarded, adBusy } from './ads.ts';
+import { showRewarded, adBusy } from './ads.ts';
 import { canShow, cooldownLeft, remainingToday, type PlacementId } from './adPolicy.ts';
 import { formatDuration, t, tf } from './i18n.ts';
 import { sfx } from './audio.ts';
@@ -296,12 +296,6 @@ export async function watchRewarded(
   }
   toast(outcome.status === 'skipped' ? t('adSkipped') : t('adFailed'), 'warn');
   return false;
-}
-
-/** 정책상 띄울 수 있으면 전면 광고를 띄운다. 실패해도 흐름은 계속된다. */
-export async function maybeInterstitial(placement: PlacementId): Promise<void> {
-  if (!canShow(placement)) return;
-  await showInterstitial(placement);
 }
 
 /**

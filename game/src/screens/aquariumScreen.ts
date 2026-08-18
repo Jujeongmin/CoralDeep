@@ -98,13 +98,6 @@ export function renderAquarium(host: HTMLElement): void {
 
   rebuild();
 
-  // 수족관 진입에는 전면 광고를 띄우지 않는다.
-  //
-  // 여기는 이 게임의 보상 화면이다 — 레벨을 깨서 모은 불가사리로 뭘 복원할지 보러 오는 자리.
-  // 그 앞에 광고를 세우면 **보상을 받으러 가는 길에 통행료를 물리는 꼴**이라,
-  // 수족관에 들르는 빈도 자체가 줄고 메타 진행이 죽는다.
-  // 전면 광고는 레벨이 끝난 뒤(`level-end`) 하나만 남긴다.
-
   host.addEventListener(
     'screen:destroy',
     () => {

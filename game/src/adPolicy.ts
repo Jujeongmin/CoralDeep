@@ -6,7 +6,6 @@
 import { dayKey, getSave, mutateSave } from './storage.ts';
 
 export type PlacementId =
-  // --- 보상형 ---
   | 'revive-extra-moves' // 실패 시 이동 +5
   | 'oxygen-refill' // 산소 고갈 시 산소통 보충 (구조 미션)
   | 'refill-hearts' // 하트 1개
@@ -17,13 +16,10 @@ export type PlacementId =
   | 'daily-chest' // 일일 보상 상자 2배
   | 'lucky-wheel-spin' // 룰렛 추가 스핀
   | 'shop-free-coin' // 상점 무료 진주
-  | 'piggy-bank-boost' // 저금통 보너스
-  // --- 전면형 ---
-  | 'level-end'; // 레벨 종료 후 (유일한 전면 광고)
+  | 'piggy-bank-boost'; // 저금통 보너스
 
 export interface PlacementDef {
   id: PlacementId;
-  kind: 'rewarded' | 'interstitial';
   /** 하루 최대 시청 횟수 */
   dailyCap: number;
   /** 같은 지면 재시청까지 최소 간격 (ms) */
@@ -34,14 +30,14 @@ const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 
 export const PLACEMENTS: Record<PlacementId, PlacementDef> = {
-  'revive-extra-moves': { id: 'revive-extra-moves', kind: 'rewarded', dailyCap: 20, cooldownMs: 0 },
-  'oxygen-refill': { id: 'oxygen-refill', kind: 'rewarded', dailyCap: 20, cooldownMs: 0 },
+  'revive-extra-moves': { id: 'revive-extra-moves', dailyCap: 20, cooldownMs: 0 },
+  'oxygen-refill': { id: 'oxygen-refill', dailyCap: 20, cooldownMs: 0 },
   // 보상이 '하트 1개'로 줄었으므로 쿨다운을 없앤다.
   //
   // 20분 쿨다운은 하트 자연 회복 주기(`HEART_REGEN_MS`)와 정확히 같다 — 그대로 두면
   // 광고를 봐도 기다리는 것과 속도가 똑같아서 볼 이유가 없다.
   // 대신 일일 상한(5)이 하루에 얻을 수 있는 총량을 잡아준다.
-  'refill-hearts': { id: 'refill-hearts', kind: 'rewarded', dailyCap: 5, cooldownMs: 0 },
+  'refill-hearts': { id: 'refill-hearts', dailyCap: 5, cooldownMs: 0 },
   // 'skip-heart-timer' 는 없앴다.
   //
   // 보상이 '회복 타이머 즉시 완료' = 사실상 하트 1개였는데, `refill-hearts` 가
@@ -50,37 +46,26 @@ export const PLACEMENTS: Record<PlacementId, PlacementDef> = {
   // 우회하는 통로도 된다. 하트 관련 보상형 지면은 `refill-hearts` 하나다.
   'free-booster-prelevel': {
     id: 'free-booster-prelevel',
-    kind: 'rewarded',
     dailyCap: 15,
     cooldownMs: 0,
   },
   'free-booster-ingame': {
     id: 'free-booster-ingame',
-    kind: 'rewarded',
     dailyCap: 15,
     cooldownMs: 0,
   },
-  'double-coins': { id: 'double-coins', kind: 'rewarded', dailyCap: 20, cooldownMs: 0 },
-  'extra-star': { id: 'extra-star', kind: 'rewarded', dailyCap: 6, cooldownMs: 10 * MIN },
-  'daily-chest': { id: 'daily-chest', kind: 'rewarded', dailyCap: 1, cooldownMs: 0 },
-  'lucky-wheel-spin': { id: 'lucky-wheel-spin', kind: 'rewarded', dailyCap: 5, cooldownMs: 3 * MIN },
-  'shop-free-coin': { id: 'shop-free-coin', kind: 'rewarded', dailyCap: 6, cooldownMs: 4 * HOUR },
-  'piggy-bank-boost': { id: 'piggy-bank-boost', kind: 'rewarded', dailyCap: 3, cooldownMs: 30 * MIN },
-  'level-end': { id: 'level-end', kind: 'interstitial', dailyCap: 25, cooldownMs: 90 * 1000 },
+  'double-coins': { id: 'double-coins', dailyCap: 20, cooldownMs: 0 },
+  'extra-star': { id: 'extra-star', dailyCap: 6, cooldownMs: 10 * MIN },
+  'daily-chest': { id: 'daily-chest', dailyCap: 1, cooldownMs: 0 },
+  'lucky-wheel-spin': { id: 'lucky-wheel-spin', dailyCap: 5, cooldownMs: 3 * MIN },
+  'shop-free-coin': { id: 'shop-free-coin', dailyCap: 6, cooldownMs: 4 * HOUR },
+  'piggy-bank-boost': { id: 'piggy-bank-boost', dailyCap: 3, cooldownMs: 30 * MIN },
   // 'aquarium-return' 은 없앴다.
   //
   // 수족관은 이 게임의 보상 화면이다 — 모은 불가사리로 뭘 복원할지 보러 오는 자리.
-  // 그 앞에 전면 광고를 세우면 보상을 받으러 가는 길에 통행료를 물리는 꼴이라,
-  // 들르는 빈도가 줄고 메타 진행 자체가 죽는다. 전면 광고는 `level-end` 하나뿐이다.
+  // 그 앞에 광고를 세우면 보상을 받으러 가는 길에 통행료를 물리는 꼴이라,
+  // 들르는 빈도가 줄고 메타 진행 자체가 죽는다.
 };
-
-/** 보상형 광고 직후 이 시간 안에는 전면 광고를 띄우지 않는다. */
-const INTERSTITIAL_QUIET_AFTER_REWARDED = 60 * 1000;
-
-/** 몇 번의 레벨 종료마다 전면 광고를 띄울지 */
-export const LEVEL_END_INTERSTITIAL_EVERY = 3;
-
-const LAST_REWARDED_KEY = '__lastRewarded';
 
 function counterFor(id: string, now: number): { day: string; count: number; lastAt: number } {
   const save = getSave();
@@ -96,11 +81,6 @@ export function canShow(id: PlacementId, now: number = Date.now()): boolean {
   const c = counterFor(id, now);
   if (c.count >= def.dailyCap) return false;
   if (c.lastAt > 0 && now - c.lastAt < def.cooldownMs) return false;
-
-  if (def.kind === 'interstitial') {
-    const lastRewarded = getSave().adCounters[LAST_REWARDED_KEY]?.lastAt ?? 0;
-    if (now - lastRewarded < INTERSTITIAL_QUIET_AFTER_REWARDED) return false;
-  }
   return true;
 }
 
@@ -124,17 +104,5 @@ export function noteShown(id: PlacementId, now: number = Date.now()): void {
     const cur = s.adCounters[id];
     const count = cur && cur.day === today ? cur.count + 1 : 1;
     s.adCounters[id] = { day: today, count, lastAt: now };
-    if (PLACEMENTS[id].kind === 'rewarded') {
-      s.adCounters[LAST_REWARDED_KEY] = { day: today, count: 0, lastAt: now };
-    }
   });
-}
-
-/** 레벨 종료 전면 광고를 띄울 차례인가 */
-export function shouldShowLevelEndInterstitial(now: number = Date.now()): boolean {
-  const count = mutateSave((s) => {
-    s.levelEndCount += 1;
-  }).levelEndCount;
-  if (count % LEVEL_END_INTERSTITIAL_EVERY !== 0) return false;
-  return canShow('level-end', now);
 }

@@ -1,6 +1,6 @@
 // 인게임 화면.
 
-import { el, iconButton, maybeInterstitial, toast } from '../ui.ts';
+import { el, iconButton, toast } from '../ui.ts';
 import { icon } from '../icons.ts';
 import { t, tf } from '../i18n.ts';
 import { sfx, startAmbience, stopAmbience } from '../audio.ts';
@@ -29,7 +29,6 @@ import { Stage3D } from '../render3d/stage.ts';
 import { preloadSprites } from '../sprites.ts';
 import { recordLevelClear, addPearls, spendHeart, useBoosterItem } from '../economy.ts';
 import { getSave, type BoosterId } from '../storage.ts';
-import { shouldShowLevelEndInterstitial } from '../adPolicy.ts';
 import { boosterMeta, openFreeBoosterModal, openLoseModal, openWinModal } from './modals.ts';
 
 const REVIVE_MOVES = 5;
@@ -81,7 +80,6 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
 
   let busy = false;
   let finished = false;
-  let pendingInterstitial = false;
   let targetBooster: InGameBooster | null = null;
   let idleTimer = 0;
   let rescueDone = false;
@@ -351,28 +349,13 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
 
   // ---- 종료 처리 ----
 
-  function markLevelEnd(): void {
-    if (pendingInterstitial) return;
-    pendingInterstitial = shouldShowLevelEndInterstitial();
-  }
-
-  async function leave(to: () => void): Promise<void> {
-    if (pendingInterstitial) {
-      pendingInterstitial = false;
-      // [광고 지면] 레벨 종료 전면 광고
-      await maybeInterstitial('level-end');
-    }
-    to();
-  }
-
   function exitToMap(): void {
-    void leave(() => navigate('map'));
+    navigate('map');
   }
 
   function onWin(): void {
     sfx.win();
     haptics.win();
-    markLevelEnd();
     const stars = levelStars(state);
     const gained = recordLevelClear(levelId, stars);
     const pearls = levelReward(levelId, stars);
@@ -382,9 +365,8 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       { levelId, stars, starsGained: gained, pearls, score: state.score },
       {
         refresh: () => undefined,
-        onMap: () => void leave(() => navigate('map')),
-        onNext: () =>
-          void leave(() => navigate('level', { levelId: levelId + 1, preBoosters: [] })),
+        onMap: () => navigate('map'),
+        onNext: () => navigate('level', { levelId: levelId + 1, preBoosters: [] }),
       },
     );
   }
@@ -392,7 +374,6 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   function onLose(): void {
     sfx.lose();
     haptics.lose();
-    markLevelEnd();
 
     const reason = loseReason(state);
 
@@ -417,9 +398,9 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
         resetIdle();
       },
       onRetry: () => {
-        void leave(() => navigate('level', { levelId, preBoosters: [] }));
+        navigate('level', { levelId, preBoosters: [] });
       },
-      onMap: () => void leave(() => navigate('map')),
+      onMap: () => navigate('map'),
     });
   }
 

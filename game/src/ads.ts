@@ -3,7 +3,6 @@
 // 공식 문서: https://docs.verse8.io/docs/ads/intro
 //   Verse8Ads.showRewarded({ placementId, timeoutMs })
 //     -> { status: 'rewarded' | 'dismissed' | 'failed', requestId?, reward?, error? }
-//   Verse8Ads.showInterstitial({ placementId })
 //
 // 규칙
 //  - 보상형은 반드시 사용자의 클릭에서만 호출한다 (자동 재생 금지).
@@ -39,13 +38,13 @@ export function adBusy(): boolean {
 
 // ---------- 개발 환경 시뮬레이션 ----------
 
-function simulate(kind: 'rewarded' | 'interstitial'): Promise<AdStatus> {
+function simulate(): Promise<AdStatus> {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'ad-overlay';
     overlay.innerHTML = `
       <div class="ad-frame">
-        <span class="ad-badge">AD · ${kind === 'rewarded' ? 'REWARDED' : 'INTERSTITIAL'}</span>
+        <span class="ad-badge">AD · REWARDED</span>
         <div class="ad-stage">
           <div class="ad-spinner"></div>
           <p class="ad-caption">${t('adCaption')}</p>
@@ -112,7 +111,7 @@ export async function showRewarded(placementId: PlacementId): Promise<RewardedOu
         return { status: 'skipped' };
       default: {
         if (import.meta.env.DEV) {
-          const status = await simulate('rewarded');
+          const status = await simulate();
           if (status === 'rewarded') noteShown(placementId);
           return { status };
         }
@@ -121,41 +120,11 @@ export async function showRewarded(placementId: PlacementId): Promise<RewardedOu
     }
   } catch {
     if (import.meta.env.DEV) {
-      const status = await simulate('rewarded');
+      const status = await simulate();
       if (status === 'rewarded') noteShown(placementId);
       return { status };
     }
     return { status: 'failed' };
-  } finally {
-    busy = false;
-  }
-}
-
-/**
- * 전면 광고. 보상이 없으므로 결과에 상관없이 진행시킨다.
- * 빈도 제어는 adPolicy 에서 한다 — 여기서는 요청만 보낸다.
- */
-export async function showInterstitial(placementId: PlacementId): Promise<void> {
-  if (busy) return;
-  busy = true;
-  ensureInit();
-
-  try {
-    const result = await Verse8Ads.showInterstitial({ placementId });
-    if (result.status === 'dismissed') {
-      // 실제로 노출된 경우에만 카운트한다 (실패까지 세면 일일 상한만 헛되이 깎인다)
-      noteShown(placementId);
-      return;
-    }
-    if (import.meta.env.DEV) {
-      await simulate('interstitial');
-      noteShown(placementId);
-    }
-  } catch {
-    if (import.meta.env.DEV) {
-      await simulate('interstitial');
-      noteShown(placementId);
-    }
   } finally {
     busy = false;
   }
