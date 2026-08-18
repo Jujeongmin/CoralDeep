@@ -6,7 +6,7 @@ import { t, tf } from '../i18n.ts';
 import { sfx, startAmbience, stopAmbience } from '../audio.ts';
 import { haptics } from '../haptics.ts';
 import { navigate, type NavParams } from '../router.ts';
-import { depthT, getLevel, levelReward, sceneVariantFor } from '../levels.ts';
+import { depthT, getLevel, levelReward } from '../levels.ts';
 import { randomSeed } from '../core/rng.ts';
 import {
   grantExtraMoves,
@@ -24,7 +24,7 @@ import {
 } from '../core/engine.ts';
 import { findFirstHint } from '../core/match.ts';
 import { BoardView } from '../render/boardView.ts';
-import { LevelScene } from '../render/levelScene.ts';
+import { Stage3D } from '../render3d/stage.ts';
 import { preloadSprites } from '../sprites.ts';
 import { recordLevelClear, addPearls, spendHeart, useBoosterItem } from '../economy.ts';
 import { getSave, type BoosterId } from '../storage.ts';
@@ -90,6 +90,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   const goalRow = el('div', { class: 'goal-row' });
   const scoreValue = el('span', { class: 'score-value', text: '0' });
   const canvas = el('canvas', { class: 'board-canvas' }) as HTMLCanvasElement;
+  const stageCanvas = el('canvas', { class: 'stage3d' }) as HTMLCanvasElement;
   const boosterBar = el('div', { class: 'booster-bar' });
   const targetHint = el('p', { class: 'target-hint', text: t('tapTarget') });
   targetHint.style.display = 'none';
@@ -122,7 +123,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   host.append(
     header,
     goalRow,
-    el('main', { class: 'screen level-screen' }, canvas),
+    el('main', { class: 'screen level-screen' }, canvas, stageCanvas),
     targetHint,
     boosterBar,
   );
@@ -133,7 +134,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   renderBoosters();
 
   // 같은 캔버스 위쪽에 장면을 함께 그린다 (박스가 따로 놀지 않게)
-  const stage = new LevelScene(sceneVariantFor(level), depthT(level.id));
+  const stage = new Stage3D(stageCanvas, depthT(level.id));
 
   const view = new BoardView(
     canvas,
@@ -194,9 +195,6 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
    * - progress: 목표 달성률. 앞을 막은 소품이 이만큼 걷힌다.
    */
   function renderScene(): void {
-    const rescue = state.goals.find(
-      (p) => p.goal.type === 'escape',
-    );
     const danger = isRescue
       ? 1 - state.oxygen / state.maxOxygen
       : state.totalMoves > 0
@@ -210,11 +208,11 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       target += p.target;
     }
 
-    stage.update({
+    // Stage3D 는 danger·progress 만 받는다 (render3d/types.ts 의 SceneView).
+    // 구조 인원 표시(rescued/total)는 LevelScene 전용이었다 — Task 7/8 에서 되살릴지 정한다.
+    stage.setView({
       danger,
       progress: target > 0 ? done / target : 0,
-      rescued: rescue?.done ?? 0,
-      total: rescue?.target ?? 0,
     });
   }
 
@@ -496,7 +494,8 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     if (status === 'lost' && !finished) {
       finished = true;
       view.setLocked(true);
-      stage.devour();
+      // 잡아먹는 포식자 연출은 아직 없다 (Task 8 에서 Stage3D 에 되살린다)
+      // stage.devour();
       // 잡아먹히는 연출을 보여준 뒤에 실패 화면을 띄운다
       window.setTimeout(onLose, 1100);
     }
@@ -512,6 +511,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       window.clearInterval(timer);
       stopAmbience();
       view.destroy();
+      stage.dispose();
     },
     { once: true },
   );

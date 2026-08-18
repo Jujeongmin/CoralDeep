@@ -1186,6 +1186,27 @@ body {
   touch-action: none;
 }
 
+/* 레벨 화면은 레이어 셋이다: CSS 배경 → 2D 보드 → 3D 무대(맨 앞).
+   3D 가 위에 오는 이유는 보드 칸 배경이 불투명이라 뒤에 두면 안 보이는데,
+   탈출 연출에서 잠수부는 보드 물길 위를 지나가야 하기 때문이다. */
+.level-screen {
+  position: relative;
+  isolation: isolate;
+}
+
+.level-screen .board-canvas {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.level-screen .stage3d {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
 .target-hint {
   margin: 0;
   padding: 4px 0;

@@ -10,6 +10,7 @@ import { WaterLayer } from './water.ts';
 import { GravelField } from './gravel.ts';
 import { TILE_ART, bakedTile, clearBaked, preloadTiles } from '../tiles.ts';
 import { texturePattern } from '../textures.ts';
+import type { Stage } from '../render3d/types.ts';
 
 export interface BoardViewCallbacks {
   /** 인접한 두 칸을 맞바꾸려 할 때 */
@@ -137,7 +138,7 @@ export class BoardView {
     private canvas: HTMLCanvasElement,
     board: Board,
     private cb: BoardViewCallbacks,
-    private scene: ScenePainter | null = null,
+    private scene: Stage | null = null,
   ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2d context unavailable');
@@ -200,7 +201,9 @@ export class BoardView {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const pad = 6;
-    this.sceneH = this.scene ? Math.round(this.scene.height(this.h)) : 0;
+    // this.scene.height(...) 는 ScenePainter 전용이라 Stage 에는 없다 (Task 7 에서 되살리거나 지운다).
+    // 3D 무대는 보드 위가 아니라 보드와 같은 화면 영역을 덮으므로 지금은 예약 높이가 0이다.
+    this.sceneH = 0;
     const boardH = this.h - this.sceneH;
     this.cell = Math.floor(Math.min((this.w - pad * 2) / this.cols, (boardH - pad * 2) / this.rows));
     this.originX = Math.floor((this.w - this.cell * this.cols) / 2);
@@ -213,6 +216,14 @@ export class BoardView {
     this.gravel.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr, this.holes);
     this.water.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr);
     this.water.syncFrom(this.passages);
+    this.scene?.setBoardRect({
+      x: this.originX,
+      y: this.originY,
+      w: this.cell * this.cols,
+      h: this.cell * this.rows,
+      cell: this.cell,
+    });
+    this.scene?.resize();
     this.dirty = true;
   }
 
@@ -717,7 +728,8 @@ export class BoardView {
     if (shake !== 0) ctx.translate(shake, shake * 0.4);
 
     if (this.scene && this.sceneH > 0) {
-      this.scene.paintBackdrop(ctx, 0, 0, this.w, this.sceneH);
+      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
+      // this.scene.paintBackdrop(ctx, 0, 0, this.w, this.sceneH);
     }
 
     const total = this.cols * this.rows;
@@ -800,8 +812,11 @@ export class BoardView {
 
     // 잠수부는 장면이 그린다. 보드 위를 지나가야 하므로 타일보다 뒤에 그릴 수 없다.
     if (this.scene && this.sceneH > 0) {
-      this.scene.setDescent(this.descentPoint());
-      this.scene.paintDiver(ctx, 0, 0, this.w, this.sceneH);
+      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
+      // 값 자체(descentPoint)는 그대로 두고 scene 으로 넘기는 두 줄만 끈다.
+      this.descentPoint();
+      // this.scene.setDescent(this.descentPoint());
+      // this.scene.paintDiver(ctx, 0, 0, this.w, this.sceneH);
     }
 
     // 선택 / 힌트.
@@ -839,6 +854,8 @@ export class BoardView {
     }
     ctx.globalAlpha = 1;
     ctx.restore();
+
+    this.scene?.render();
   }
 
   private drawSelection(i: number, color: string, alpha: number): void {
@@ -1213,7 +1230,9 @@ export class BoardView {
     const ENTER = 0.15;
     if (this.escapeT < ENTER) {
       const p = this.escapeT / ENTER;
-      const from = this.scene?.diverAnchor(0, 0, this.w, this.sceneH);
+      // ScenePainter 전용 — Stage 에는 없다. Task 7 에서 되살리거나 지운다.
+      // const from = this.scene?.diverAnchor(0, 0, this.w, this.sceneH);
+      let from: { x: number; y: number; scale: number } | undefined;
       if (!from) return { x: entryX, y: entryY, scale: boardScale, t: this.escapeT };
       return {
         x: from.x + (entryX - from.x) * p,
