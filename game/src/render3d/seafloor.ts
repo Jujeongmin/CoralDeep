@@ -188,18 +188,30 @@ export class Seafloor {
       const x = (hash01(seed + i * 3.1) - 0.5) * spanX;
       const y = (hash01(seed + i * 7.7) - 0.5) * spanY;
       const r = pxToWorld(10 + hash01(seed + i * 1.3) * 16, view);
+      const z = -0.2 - hash01(seed + i * 5.5) * 1.4;
 
       // 구멍 안이면 버린다. 구멍 = 보드 = 2D 가 그리는 자리다.
       //
-      // 여유는 알의 실제 반지름 r 로 잡는다 — 알마다 크기가 다른데 고정폭 여유를
-      // 쓰면 큰 알은 중심이 여유 밖이어도 몸통이 구멍으로 삐져나온다(보드 위 타일을
-      // 가리게 된다). r 을 여유로 쓰면 어떤 알도 구멍을 침범하지 않으면서, 동시에
-      // 작은 알은 구멍 바로 앞까지 빈틈없이 채워져 자갈을 파낸 단면처럼 보인다.
-      if (Math.abs(x - hole.cx) < hole.w / 2 + r && Math.abs(y - hole.cy) < hole.h / 2 + r) {
+      // x, y, r 은 z=0 기준인데 알은 실제로 z(< 0, 카메라에서 더 멀다)에 놓인다.
+      // 원근 때문에 그 알은 화면에 x, y 가 아니라 depthScale(camZ, z) 로 나눈
+      // 자리에 찍힌다(바닥판 구멍을 지을 때와 같은 배율, 방향만 반대 — 여기서는
+      // z=0 좌표를 실제 깊이의 화면 위치로 "투영"하는 것이므로 곱하지 않고 나눈다).
+      // 중심만 투영하고 그 위에 z=0 기준 반지름 r 을 얹으면 안 된다 — 반지름도
+      // 같은 원근을 받으므로 얕은 알과 깊은 알의 실제 화면 크기가 다르다.
+      // 두 값 다 투영한 뒤에 구멍과 비교해야 "화면에 실제로 찍히는 자리"가
+      // 구멍을 침범하는지 알 수 있다. 이걸 안 하면 알마다 깊이가 달라 침범량이
+      // 들쭉날쭉해진다 — 실측에서 본 것과 같은 들쭉날쭉한 침범이 바로 이 증상이다.
+      const depthK = depthScale(camZ, z);
+      const screenX = x / depthK;
+      const screenY = y / depthK;
+      const screenR = r / depthK;
+      if (
+        Math.abs(screenX - hole.cx) < hole.w / 2 + screenR &&
+        Math.abs(screenY - hole.cy) < hole.h / 2 + screenR
+      ) {
         continue;
       }
 
-      const z = -0.2 - hash01(seed + i * 5.5) * 1.4;
       pos.set(x, y, z);
       e.set(
         hash01(seed + i * 2.2) * 6.28,
