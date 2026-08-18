@@ -77,6 +77,21 @@ export class Diver {
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // 잠수부는 화면에서 바로 읽혀야 하는 감정적 중심인데, 실측(라이브 WebGL
+    // 픽셀)에서 헬멧 구리색(약 RGB 186/148/86) 픽셀이 0개 나왔다 — 배경 톤과
+    // 같은 물빛 조명(key 0xdff4ff, hemisphere mood.top/bottom)이 구리색의 R 채널을
+    // G 보다 더 세게 눌러 색상 순서 자체가 뒤집혔기 때문이다(R/G 비가 라이팅
+    // 전 1.26 -> 라이팅 후 약 0.84). 두 가지로 고친다:
+    //  1) fog 제외 -- 잠수부는 이 장면에서 카메라와 가장 가까운 물체(z=1.2)라
+    //     원경 안개가 짙게 걸리는 게 애초에 물리적으로도 맞지 않는다.
+    //  2) 재질 색조 보정 -- MeshLambertMaterial 의 diffuse 는 최종 라이팅 결과에
+    //     그대로 곱해지는 순수 배율이라(directDiffuse/indirectDiffuse 둘 다),
+    //     R 을 올리고 G/B 를 살짝 낮추면 조명이 어떻게 걸리든(그림자건 하이라이트건)
+    //     비율이 항상 같은 배로 보정된다 -- NdotL 기반 음영은 그대로 살아있으므로
+    //     '조명받는 것처럼' 보이지, 스티커처럼 붙는 게 아니다. 전체 밝기(luma)는
+    //     거의 그대로다(R 가중치가 작아 G/B 인하와 상쇄된다) -- 튀지 않는다.
+    this.mat.color.setRGB(1.6, 0.8, 0.8);
+    this.mat.fog = false;
   }
 
   async load(): Promise<void> {
