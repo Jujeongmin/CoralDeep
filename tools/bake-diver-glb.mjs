@@ -1,8 +1,15 @@
-// 잠수부 굽기 — Quaternius SpaceSuit(FBX, CC0) -> diver.glb
+// 잠수부 굽기 - Quaternius SpaceSuit(FBX, CC0) -> diver.glb
 //
 // 예전 도구(bake-diver-3d.mjs)는 같은 FBX 를 소프트웨어 렌더러로 PNG 한 장에 구웠다.
-// 이제 런타임이 3D 라서 기하를 그대로 내보낸다. 치수·포즈·팔레트는 그 도구의 것을
-// 그대로 쓴다 — 직접 재본 값이라 다시 유도하면 틀린다.
+// 이 도구는 그다음 세대(정적 3D 메시)를 거쳐, 이제는 Quaternius 애니메이션
+// 라이브러리(assets-raw/quaternius-men/unpacked/Animations.fbx)의 Idle 클립을 실제
+// 스켈레탈 애니메이션으로 구워 넣는다 - 몸 전체를 흔드는 사인 두 개로 "떠 있는 척"
+// 하던 걸(game/src/render3d/diver.ts 의 예전 방식) 진짜 관절 움직임으로 바꾼다.
+//
+// 런타임에는 스키닝을 절대 안 한다(SkinnedMesh, 본 계층 없음 - glb.ts 는 최소
+// 파서로 계속 남는다). 대신 이 도구가 오프라인에서 Idle 루프를 몇 프레임 샘플링해
+// 스키닝을 CPU 로 미리 계산하고, 정점 위치를 그대로 구워 glb 에 얹는다. 런타임은
+// 그 프레임 사이를 보간만 한다 - diver.ts 참고.
 //
 // 좌표계로 두 번 틀렸던 기록을 남긴다:
 //   * FBX 표준은 Y-up 이지만 Blender 로 내보낸 것은 Z-up 이다. 틀리면 정수리에서
@@ -16,98 +23,124 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { meshesOf, parseFbx } from './lib/fbx.mjs';
+import {
+  clusterOffsets,
+  computeGlobalTransforms,
+  findMeshModelId,
+  globalTransformStatic,
+  indexClustersByVertex,
+  invertAffine,
+  parseAnimationClip,
+  parseModelHierarchy,
+  parseSkin,
+  skinAllVertices,
+} from './lib/fbxSkin.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = resolve(ROOT, 'assets-raw/quaternius-men/SpaceSuit');
+// unpacked/ 의 SpaceSuit 부위 FBX 는 assets-raw/quaternius-men/SpaceSuit/ 와 구조가
+// 동일하다(바이트 단위로 같다) - 애니메이션 라이브러리와 한 폴더에 있는 unpacked/ 를 쓴다.
+const SRC = resolve(ROOT, 'assets-raw/quaternius-men/unpacked');
 const OUT = resolve(ROOT, 'game/src/assets/sprites3d/diver.glb');
 
 // ---- 모델 치수 (bake-diver-3d.mjs 에서 그대로. 단위: 모델 좌표, z 가 높이) ----
-const TORSO_HALF_W = 0.19; // 이 바깥은 팔
-const SHOULDER_Z = 1.5; // 팔이 붙는 높이 (회전축)
+// 팔 각도를 직접 돌리던 예전 도구와 달리 이제는 정점 자체가 Idle 클립을 통해
+// "팔을 내린" 스킨 결과로 나오므로 TORSO_HALF_W/SHOULDER_Z/ARM_DROP 은 더 필요
+// 없다. 전신 높이 정규화 기준(HEAD_TOP_Z, FOOT_Z)만 그대로 쓴다 - 이 값을 바꾸면
+// CELLS_TALL 등 diver.ts/depthProjection.ts 의 기존 보정 상수와 어긋난다.
 const HEAD_TOP_Z = 1.89;
 const FOOT_Z = 0;
 
-/** 팔을 내리는 각도. 0 이면 T 포즈, 완전 수직은 차렷이라 뻣뻣하다. 75도가 자연스럽다. */
-const ARM_DROP = (75 * Math.PI) / 180;
-
 // 잠수복 팔레트 (0..255). 구리 헬멧이 정체를 한 번에 알리고, 네오프렌 몸통과 납 부츠가
-// 그걸 받친다. 몸통을 너무 어둡게 두면 640m 물빛에 실루엣이 잠긴다 — 대비는 헬멧이 만든다.
+// 그걸 받친다. 몸통을 너무 어둡게 두면 640m 물빛에 실루엣이 잠긴다 - 대비는 헬멧이 만든다.
 const HELMET = [186, 148, 86];
 const SUIT = [56, 84, 106];
 const PANTS = [40, 62, 82];
 const BOOT = [118, 104, 88];
+const TINT = { Head: HELMET, Body: SUIT, Legs: PANTS, Feet: BOOT };
 
-const parts = {};
-for (const name of ['Head', 'Body', 'Legs', 'Feet']) {
-  parts[name] = meshesOf(parseFbx(readFileSync(resolve(SRC, `SpaceSuit_${name}.fbx`))));
-}
+// ---- 재생할 애니메이션 클립 ----
+//
+// Animations.fbx 에는 Idle 계열이 6개 있다: Idle, Idle_Gun, Idle_Gun_Pointing,
+// Idle_Gun_Shoot, Idle_Neutral, Idle_Sword. 잠수부는 총도 칼도 안 드므로 후보는
+// Idle 과 Idle_Neutral 둘로 좁혀진다. 8프레임 샘플로 정점 움직임 범위를 재보면
+// Idle 이 0.0335, Idle_Neutral 이 0.0159(정규화된 모델 좌표 기준, 전신 높이가 1) -
+// 거의 절반이다. 이 게임은 런타임에서 루프를 몇 배 느리게 늘려 재생하므로(diver.ts
+// 의 IDLE_ANIM_LOOP_SECONDS), 원본 움직임이 작을수록 늘렸을 때 거의 안 보이게
+// 잦아든다. 부유감을 살리려면 원본이 더 큰 쪽이 유리해 Idle 을 골랐다. 두 클립
+// 다 팔은 이미 T포즈가 아니라 몸통 옆으로 내려와 있다(원본 클립 자체가 그렇게
+// 애니메이션되어 있다) - 예전 poseArms() 같은 수동 회전은 더는 필요 없다.
+const ANIM_CLIP = 'CharacterArmature|Idle';
 
-/**
- * 팔 정점을 어깨 축으로 돌려 아래로 내린다.
- *
- * T 포즈라 팔이 X 축에 정렬돼 있어서 (x, z) 평면 회전 하나로 끝난다.
- * 오른팔(+x)과 왼팔(-x)은 서로 반대로 돌아야 둘 다 아래로 간다.
- */
-function poseArms(meshes) {
-  const cos = Math.cos(ARM_DROP);
-  const sin = Math.sin(ARM_DROP);
-  return meshes.map((m) => {
-    const verts = m.verts.slice();
-    for (let i = 0; i < verts.length; i += 3) {
-      const x = verts[i];
-      if (Math.abs(x) <= TORSO_HALF_W) continue;
-      const side = x > 0 ? 1 : -1;
-      const dx = x - side * TORSO_HALF_W;
-      const dz = verts[i + 2] - SHOULDER_Z;
-      verts[i] = side * TORSO_HALF_W + (dx * cos + side * dz * sin);
-      verts[i + 2] = SHOULDER_Z + (-side * dx * sin + dz * cos);
-    }
-    return { verts, tris: m.tris };
-  });
-}
+// 루프 한 바퀴를 몇 프레임으로 구울까.
+//
+// 정점 5470개 * 3축 * 2바이트(Int16 델타) = 프레임당 32820바이트. 예산은
+// "추가되는 애니메이션 데이터 400KB 이하". 프레임 0 은 POSITION 자체이므로 델타를
+// 저장할 필요가 없다 - 실제로 굽는 델타는 FRAME_COUNT-1 개.
+//   11 * 32820 ≈ 351.6KB  (FRAME_COUNT=12, 이 값)
+//   12 * 32820 ≈ 384.6KB  (FRAME_COUNT=13, 여유가 빠듯하다)
+// Idle 클립 자체가 50프레임(30fps, 1.667초)이고 움직임이 느린 호흡·흔들림
+// 수준이라 12프레임 샘플로도 원본 곡선과 시각적으로 거의 구분이 안 된다.
+const FRAME_COUNT = 12;
 
-// 팔은 Body 에 붙어 있으므로 Body 만 포즈를 잡는다.
-// 부위마다 색이 다르므로 색을 달고 다닌다.
-const tinted = [
-  ...parts.Head.map((m) => ({ ...m, rgb: HELMET })),
-  ...poseArms(parts.Body).map((m) => ({ ...m, rgb: SUIT })),
-  ...parts.Legs.map((m) => ({ ...m, rgb: PANTS })),
-  ...parts.Feet.map((m) => ({ ...m, rgb: BOOT })),
-];
+const PART_NAMES = ['Head', 'Body', 'Legs', 'Feet'];
+
+const parts = PART_NAMES.map((name) => {
+  const nodes = parseFbx(readFileSync(resolve(SRC, `SpaceSuit_${name}.fbx`)));
+  const hierarchy = parseModelHierarchy(nodes);
+  const meshModelId = findMeshModelId(nodes);
+  const meshGlobalNow = globalTransformStatic(hierarchy, meshModelId);
+  const invMeshGlobalNow = invertAffine(meshGlobalNow);
+  const clusters = indexClustersByVertex(clusterOffsets(parseSkin(nodes), meshGlobalNow));
+  const mesh = meshesOf(nodes)[0];
+  return { name, mesh, clusters, invMeshGlobalNow, rgb: TINT[name] };
+});
+
+const animNodes = parseFbx(readFileSync(resolve(SRC, 'Animations.fbx')));
+const animHierarchy = parseModelHierarchy(animNodes);
+const clip = parseAnimationClip(animNodes, ANIM_CLIP);
 
 /** 모델 좌표 -> Y-up, +Z 정면 */
 const mapVert = (v, i) => [v[i], v[i + 2], -v[i + 1]];
 
 /**
- * 부위 메시들을 정점 하나짜리 버퍼로 합친다.
- * 부위마다 인덱스가 0부터 다시 시작하므로 오프셋을 더해야 한다.
+ * 시각 t(초) 에서 네 부위를 전부 스킨해 Head, Body, Legs, Feet 순서로 이어붙인,
+ * 아직 정규화 전인 위치 배열을 만든다. 순서는 buildColorAndIndex() 의 순서와
+ * 반드시 같아야 정점 인덱스가 어긋나지 않는다.
  */
-function merge(meshes) {
+function mergedPositionAt(t) {
+  const boneGlobals = computeGlobalTransforms(animHierarchy, clip, t);
   const position = [];
+  for (const part of parts) {
+    const skinned = skinAllVertices(part.mesh.verts, part.clusters, boneGlobals, part.invMeshGlobalNow);
+    for (let i = 0; i < skinned.length; i += 3) {
+      const [x, y, z] = mapVert(skinned, i);
+      position.push(x, y, z);
+    }
+  }
+  return new Float32Array(position);
+}
+
+/** 색·인덱스는 애니메이션과 무관 - 부위별 정점 개수·삼각형만 있으면 한 번만 지으면 된다. */
+function buildColorAndIndex() {
   const color = [];
   const index = [];
-  for (const m of meshes) {
-    const base = position.length / 3;
-    for (let i = 0; i < m.verts.length; i += 3) {
-      const [x, y, z] = mapVert(m.verts, i);
-      position.push(x, y, z);
-      color.push(m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255);
-    }
-    for (const tri of m.tris) index.push(base + tri[0], base + tri[1], base + tri[2]);
+  let base = 0;
+  for (const part of parts) {
+    const n = part.mesh.verts.length / 3;
+    for (let i = 0; i < n; i++) color.push(part.rgb[0] / 255, part.rgb[1] / 255, part.rgb[2] / 255);
+    for (const tri of part.mesh.tris) index.push(base + tri[0], base + tri[1], base + tri[2]);
+    base += n;
   }
-  return {
-    position: new Float32Array(position),
-    color: new Float32Array(color),
-    index: new Uint32Array(index),
-  };
+  return { color: new Float32Array(color), index: new Uint32Array(index) };
 }
 
 /**
- * 발이 y=0, 정수리가 y=1 이 되도록 정규화한다.
- * 런타임이 칸 크기에 맞춰 scale 만 곱하면 되게 하려면 전신 높이가 1 이어야 한다.
- * 좌우·앞뒤는 가운데로 모은다.
+ * 발이 y=0, 정수리가 y=1 이 되는 정규화 상수를 프레임 하나에서 구한다.
+ * 모든 프레임에 이 값을 그대로 재사용해야 한다 - 프레임마다 따로 구하면(포즈가
+ * 조금만 바뀌어도 정점 평균이 흔들리므로) 진짜 움직임이 아닌 "재중심 잡기" 흔들림이
+ * 델타에 섞여 들어간다.
  */
-function normalize(position) {
+function computeNormalizeParams(position) {
   const span = HEAD_TOP_Z - FOOT_Z;
   let minY = Infinity;
   let cx = 0;
@@ -118,8 +151,11 @@ function normalize(position) {
     cz += position[i + 2];
   }
   const n = position.length / 3;
-  cx /= n;
-  cz /= n;
+  return { span, minY, cx: cx / n, cz: cz / n };
+}
+
+function applyNormalize(position, params) {
+  const { span, minY, cx, cz } = params;
   for (let i = 0; i < position.length; i += 3) {
     position[i] = (position[i] - cx) / span;
     position[i + 1] = (position[i + 1] - minY) / span;
@@ -128,8 +164,12 @@ function normalize(position) {
 }
 
 /**
- * 면 법선을 정점에 누적한 뒤 정규화한다.
- * 런타임이 flatShading 을 쓰므로 정밀할 필요는 없다.
+ * 면 법선을 정점에 누적한 뒤 정규화한다. 프레임 0(포즈가 정해진 기준 자세)에서만
+ * 계산해 전 프레임이 공유한다 - 다른 이유가 아니라 예산과 판단의 문제다: Idle 은
+ * 가슴이 살짝 오르내리고 팔이 조금 흔들리는 정도라(정점 이동 범위 실측 0.03,
+ * 전신 높이 1 기준) 그림자 경계가 눈에 띄게 어긋날 만큼 크지 않다. 프레임마다
+ * 법선까지 다시 구우면 저장 용량이 두 배가 되는데, 이 정도로 미묘한 Idle 에는
+ * 안 맞는 값이라고 판단했다. 런타임이 flatShading 을 쓰므로 정밀할 필요도 없다.
  */
 function computeNormals(position, index) {
   const normal = new Float32Array(position.length);
@@ -164,21 +204,28 @@ function computeNormals(position, index) {
 /**
  * 최소 glb 작성기.
  * 읽을 파서도 우리가 쓰므로 규격 전부를 만족시킬 필요는 없다. 그래도 확장자를 .glb 로
- * 쓰는 이상 헤더·청크 구조는 규격대로 맞춘다 — 나중에 다른 도구로 열어볼 때 그게 싸다.
+ * 쓰는 이상 헤더·청크 구조는 규격대로 맞춘다 - 나중에 다른 도구로 열어볼 때 그게 싸다.
+ *
+ * anim(diverAnim) 은 glTF 정식 애니메이션 규격이 아니다 - 스켈레톤·채널·보간기까지
+ * 구현하면 glb.ts 가 GLTFLoader 급으로 커진다(금지 사항). extras.diverAnim 이라는
+ * 우리만의 필드에 얹고, 값은 별도 bufferView 의 원시 Int16 바이트로 둔다.
  */
-function writeGlb(position, normal, color, index) {
+function writeGlb(position, normal, color, index, anim) {
   const pad4 = (n) => (n + 3) & ~3;
+  const deltaBuf = Buffer.from(anim.deltaInt16.buffer, anim.deltaInt16.byteOffset, anim.deltaInt16.byteLength);
   const bin = Buffer.concat([
     Buffer.from(position.buffer, position.byteOffset, position.byteLength),
     Buffer.from(normal.buffer, normal.byteOffset, normal.byteLength),
     Buffer.from(color.buffer, color.byteOffset, color.byteLength),
     Buffer.from(index.buffer, index.byteOffset, index.byteLength),
+    deltaBuf,
   ]);
   const offs = {
     pos: 0,
     nrm: position.byteLength,
     col: position.byteLength + normal.byteLength,
     idx: position.byteLength + normal.byteLength + color.byteLength,
+    anim: position.byteLength + normal.byteLength + color.byteLength + index.byteLength,
   };
   const json = {
     asset: { version: '2.0', generator: 'coral-deep bake-diver-glb' },
@@ -194,6 +241,7 @@ function writeGlb(position, normal, color, index) {
       { buffer: 0, byteOffset: offs.nrm, byteLength: normal.byteLength, target: 34962 },
       { buffer: 0, byteOffset: offs.col, byteLength: color.byteLength, target: 34962 },
       { buffer: 0, byteOffset: offs.idx, byteLength: index.byteLength, target: 34963 },
+      { buffer: 0, byteOffset: offs.anim, byteLength: deltaBuf.length },
     ],
     accessors: [
       { bufferView: 0, componentType: 5126, count: position.length / 3, type: 'VEC3' },
@@ -201,6 +249,20 @@ function writeGlb(position, normal, color, index) {
       { bufferView: 2, componentType: 5126, count: color.length / 3, type: 'VEC3' },
       { bufferView: 3, componentType: 5125, count: index.length, type: 'SCALAR' },
     ],
+    extras: {
+      diverAnim: {
+        clip: ANIM_CLIP,
+        // 프레임 0 은 POSITION(accessor 0) 그대로다. 프레임 1..frameCount-1 은
+        // POSITION 대비 델타를 축마다 대칭 스케일로 양자화한 Int16 다:
+        //   delta[axis] = int16 * scale[axis]
+        // deltasBufferView 안의 레이아웃은 [frame][vertex][xyz] - 즉
+        // frame(0-based, POSITION 다음이니 실제로는 1번 프레임부터) 하나당
+        // vertexCount*3 개의 Int16 이 이어진다. glb.ts 가 읽는 쪽 주석 참고.
+        frameCount: anim.frameCount,
+        scale: anim.scale,
+        deltasBufferView: 4,
+      },
+    },
   };
   const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8');
   const jsonPad = Buffer.alloc(pad4(jsonBuf.length) - jsonBuf.length, 0x20);
@@ -218,10 +280,79 @@ function writeGlb(position, normal, color, index) {
   binHead.writeUInt32LE(0x004e4942, 4); // 'BIN'
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, Buffer.concat([head, jsonHead, jsonBuf, jsonPad, binHead, bin, binPad]));
+  return deltaBuf.length;
 }
 
-const merged = merge(tinted);
-normalize(merged.position);
-const normal = computeNormals(merged.position, merged.index);
-writeGlb(merged.position, normal, merged.color, merged.index);
-console.log(`diver.glb  정점 ${merged.position.length / 3}  삼각형 ${merged.index.length / 3}`);
+// ---- 굽기 ----
+
+const { color, index } = buildColorAndIndex();
+
+const frame0Raw = mergedPositionAt(0);
+const normParams = computeNormalizeParams(frame0Raw);
+applyNormalize(frame0Raw, normParams);
+const position = frame0Raw;
+const normal = computeNormals(position, index);
+
+const vertCount = position.length / 3;
+const deltaFrames = [];
+for (let i = 1; i < FRAME_COUNT; i++) {
+  const t = (clip.durationSeconds * i) / FRAME_COUNT;
+  const raw = mergedPositionAt(t);
+  applyNormalize(raw, normParams);
+  const delta = new Float32Array(raw.length);
+  for (let k = 0; k < raw.length; k++) delta[k] = raw[k] - position[k];
+  deltaFrames.push(delta);
+}
+
+// 축마다 대칭 양자화 스케일: 그 축에서 관측된 최대 절댓값 / 32767.
+const scale = [0, 0, 0];
+for (const delta of deltaFrames) {
+  for (let i = 0; i < delta.length; i += 3) {
+    scale[0] = Math.max(scale[0], Math.abs(delta[i]));
+    scale[1] = Math.max(scale[1], Math.abs(delta[i + 1]));
+    scale[2] = Math.max(scale[2], Math.abs(delta[i + 2]));
+  }
+}
+for (let a = 0; a < 3; a++) scale[a] = scale[a] / 32767 || 1; // 그 축이 아예 안 움직이면 0/0 방지용 1
+
+const deltaInt16 = new Int16Array(deltaFrames.length * vertCount * 3);
+{
+  let w = 0;
+  for (const delta of deltaFrames) {
+    for (let i = 0; i < delta.length; i += 3) {
+      deltaInt16[w++] = Math.round(delta[i] / scale[0]);
+      deltaInt16[w++] = Math.round(delta[i + 1] / scale[1]);
+      deltaInt16[w++] = Math.round(delta[i + 2] / scale[2]);
+    }
+  }
+}
+
+// 실루엣이 프레임 사이에서 얼마나 움직이는지(정규화 모델 좌표, 전신 높이가 1) -
+// 검증할 때 화면 px 로 환산하는 데 쓴다.
+let maxRangeSq = 0;
+for (let vi = 0; vi < vertCount; vi++) {
+  let mn = [position[vi * 3], position[vi * 3 + 1], position[vi * 3 + 2]];
+  let mx = [...mn];
+  for (const delta of deltaFrames) {
+    for (let a = 0; a < 3; a++) {
+      const v = position[vi * 3 + a] + delta[vi * 3 + a];
+      mn[a] = Math.min(mn[a], v);
+      mx[a] = Math.max(mx[a], v);
+    }
+  }
+  const dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
+  maxRangeSq = Math.max(maxRangeSq, dx * dx + dy * dy + dz * dz);
+}
+const maxSilhouetteRange = Math.sqrt(maxRangeSq);
+
+const animBytes = writeGlb(position, normal, color, index, { frameCount: FRAME_COUNT, scale, deltaInt16 });
+
+console.log(`diver.glb  정점 ${position.length / 3}  삼각형 ${index.length / 3}`);
+console.log(
+  `애니메이션  clip=${ANIM_CLIP}  프레임 ${FRAME_COUNT}(루프 ${clip.durationSeconds.toFixed(3)}s 를 균등 샘플)` +
+    `  델타 ${(animBytes / 1024).toFixed(1)}KB  축스케일 ${scale.map((s) => s.toExponential(3)).join(', ')}`,
+);
+console.log(
+  `가장 많이 움직이는 정점의 프레임 간 최대 이동 범위(정규화 모델 좌표, 전신 높이=1): ${maxSilhouetteRange.toFixed(4)}` +
+    ` (전신 높이 82px 기준 약 ${(maxSilhouetteRange * 82).toFixed(1)}px)`,
+);

@@ -1,10 +1,18 @@
 // 잠수부.
 //
-// 움직임은 관절이 아니라 몸 전체가 만든다. 물에 뜬 사람은 팔다리를 휘젓는 게 아니라
-// 천천히 오르내리며 좌우로 기운다. 주기가 어긋나는 사인 둘을 겹친다 — 하나만 쓰면
-// 시계추처럼 규칙적이라 기계로 보인다. 위급하면 속도와 폭만 커진다.
+// 몸 전체 움직임(오르내림·기울기·요)은 관절이 아니라 사인파로 만든다. 물에 뜬
+// 사람은 팔다리를 휘젓는 게 아니라 천천히 오르내리며 좌우로 기운다. 주기가
+// 어긋나는 사인 둘을 겹친다 — 하나만 쓰면 시계추처럼 규칙적이라 기계로 보인다.
+// 위급하면 속도와 폭만 커진다.
 // (2D 의 diverRig.ts 가 쓰던 규칙 그대로다. 저폴리 모델을 관절로 꺾으면 이음매가
 //  벌어져 종이인형이 되므로 그때도 몸 전체로 움직였다.)
+//
+// 그 위에 diver.glb 에 구워 넣은 Idle 스켈레탈 애니메이션(가슴 호흡, 팔 흔들림 등
+// 진짜 관절 움직임)을 정점 단위로 얹는다. 런타임은 스키닝을 하지 않는다 — glb 에
+// 이미 몇 프레임의 정점 위치가 미리 스킨되어 들어 있고(tools/bake-diver-glb.mjs),
+// 여기서는 두 프레임 사이를 선형보간해 매 프레임 position 버퍼를 다시 쓸 뿐이다.
+// 원본 Idle 클립(1.667초)보다 훨씬 느리게 돌린다 — 관절 애니메이션이라기보다
+// 물속에서 부유하며 숨쉬는 정도로 읽혀야 한다.
 //
 // 잠수부는 z=0 이 아니라 카메라 쪽(z>0)에 뜬다 — 3D 캔버스가 보드보다 앞이므로
 // 탈출 중에도 타일에 가리려면 카메라와 더 가까워야 한다. screenToPlane() 은 z=0
@@ -15,7 +23,7 @@
 import * as THREE from 'three';
 
 import { depthScale, maxIdleBobWorld } from './depthProjection.ts';
-import { parseGlb } from './glb.ts';
+import { type GlbAnim, parseGlb } from './glb.ts';
 import { type PlaneView, pxToWorld, screenToPlane } from './projection.ts';
 import type { DescentPoint } from './types.ts';
 
@@ -36,10 +44,26 @@ const DESCENT_Z = 1.0;
  */
 const MODEL_WIDTH_RATIO = 0.34;
 
+/**
+ * Idle 루프 한 바퀴를 재생하는 데 걸리는 시간(초). 원본 클립은 1.667초(30fps
+ * 50프레임)로 실제 사람이 서 있는 속도다 — 그대로 틀면 "관절이 움직이는 애니메이션"
+ * 으로 읽혀 부유감이 안 산다. 사용자 요청대로 느리게 튼다: 4배 이상 늘려 숨쉬듯
+ * 잔잔하게 움직이게 한다. this.t 로 위상을 잡으므로(아래 step()) danger 가 커지면
+ * (this.t 자체가 빨리 흐른다) 이 루프도 같이 빨라진다 — "위급하면 속도가 커진다"
+ * 는 기존 규칙과 일관된다.
+ */
+const IDLE_ANIM_LOOP_SECONDS = 7;
+
 export class Diver {
   private mesh: THREE.Mesh | null = null;
   private geom: THREE.BufferGeometry | null = null;
   private mat: THREE.MeshLambertMaterial;
+  /** glb 에 구운 Idle 프레임 — 없으면(구버전 등) 정지 포즈로만 그린다. */
+  private anim: GlbAnim | null = null;
+  /** anim.deltas 를 축마다 Float32 로 미리 풀어 둔 정점 위치들 — framePositions[0] 은 position 그대로. */
+  private animFrames: Float32Array[] | null = null;
+  /** step() 이 매 프레임 덮어쓰는, geometry 에 붙인 실제 출력 버퍼. */
+  private animOut: Float32Array | null = null;
   private t = 0;
   private danger = 0;
   private home = new THREE.Vector3();
@@ -60,11 +84,16 @@ export class Diver {
     const mesh = parseGlb(await res.arrayBuffer());
     if (this.disposed) return;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(mesh.position, 3));
+    // position 은 애니메이션이 있으면 매 프레임 덮어쓸 별도 버퍼를 쓴다 — mesh.position
+    // 자체(프레임 0, 언퀀타이즈된 기준 자세)는 animFrames[0] 으로 그대로 보존해 둔다.
+    this.animOut = mesh.anim ? mesh.position.slice() : mesh.position;
+    g.setAttribute('position', new THREE.BufferAttribute(this.animOut, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(mesh.normal, 3));
     g.setAttribute('color', new THREE.BufferAttribute(mesh.color, 3));
     g.setIndex(new THREE.BufferAttribute(mesh.index, 1));
     this.geom = g;
+    this.anim = mesh.anim;
+    this.animFrames = mesh.anim ? unpackAnimFrames(mesh.position, mesh.anim) : null;
     this.mesh = new THREE.Mesh(g, this.mat);
     this.mesh.scale.setScalar(this.homeScale);
     this.mesh.position.copy(this.home);
@@ -135,6 +164,7 @@ export class Diver {
   step(dt: number): void {
     if (!this.mesh) return;
     this.t += dt * (1 + this.danger * 1.6);
+    this.stepAnim();
     if (this.descent) return; // 탈출 중에는 경로가 위치를 쥔다
 
     const amp = 1 + this.danger * 1.8;
@@ -149,10 +179,57 @@ export class Diver {
     this.mesh.rotation.set(0, Math.sin(this.t * 0.21) * 0.25 * amp, tilt * amp);
   }
 
+  /**
+   * 구운 Idle 프레임 중 두 개를 골라 선형보간해 position 버퍼를 다시 쓴다.
+   * 탈출 중(descent)에도 계속 돈다 — 몸 전체 위치는 경로가 쥐지만, 숨쉬는 정도의
+   * 미세한 움직임까지 멈출 이유는 없다(탈출 중에도 "살아있는" 잠수부로 보인다).
+   */
+  private stepAnim(): void {
+    if (!this.anim || !this.animFrames || !this.animOut || !this.geom) return;
+    const frameCount = this.anim.frameCount;
+    // this.t 는 절대 감소하지 않으므로(step() 에서 매번 더하기만 한다) % 결과가
+    // 항상 [0,1) 안에 든다 — 음수 보정이 필요 없다.
+    const phase = (this.t / IDLE_ANIM_LOOP_SECONDS) % 1;
+    const scaled = phase * frameCount;
+    const i0 = Math.floor(scaled) % frameCount;
+    const i1 = (i0 + 1) % frameCount;
+    const frac = scaled - Math.floor(scaled);
+
+    const a = this.animFrames[i0];
+    const b = this.animFrames[i1];
+    const out = this.animOut;
+    for (let i = 0; i < out.length; i++) out[i] = a[i] + (b[i] - a[i]) * frac;
+    (this.geom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.mesh) this.scene.remove(this.mesh);
     this.geom?.dispose();
     this.mat.dispose();
   }
+}
+
+/**
+ * anim.deltas(Int16, 축마다 대칭 양자화)를 프레임별 Float32Array 로 풀어 둔다.
+ * frames[0] 은 position 자체(복사본)고, frames[1..frameCount-1] 은
+ * position + delta*scale 이다 — bake-diver-glb.mjs 가 쓰는 것과 같은 dequant 식.
+ * step() 에서 매번 정수->실수 변환을 반복하지 않으려고 load() 때 한 번만 푼다.
+ */
+function unpackAnimFrames(position: Float32Array, anim: GlbAnim): Float32Array[] {
+  const [sx, sy, sz] = anim.scale;
+  const vertexCount = position.length / 3;
+  const frames: Float32Array[] = [position.slice()];
+  for (let f = 1; f < anim.frameCount; f++) {
+    const frame = new Float32Array(position.length);
+    const base = (f - 1) * vertexCount * 3;
+    for (let vi = 0; vi < vertexCount; vi++) {
+      const o = vi * 3;
+      frame[o] = position[o] + anim.deltas[base + o] * sx;
+      frame[o + 1] = position[o + 1] + anim.deltas[base + o + 1] * sy;
+      frame[o + 2] = position[o + 2] + anim.deltas[base + o + 2] * sz;
+    }
+    frames.push(frame);
+  }
+  return frames;
 }
