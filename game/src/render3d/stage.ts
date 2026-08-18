@@ -10,6 +10,7 @@ import * as THREE from 'three';
 
 import { depthMood } from '../render/depth.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
+import { Seafloor } from './seafloor.ts';
 import type { BoardRect, DescentPoint, SceneView, Stage } from './types.ts';
 
 const FOV = 45;
@@ -29,7 +30,8 @@ export class Stage3D implements Stage {
   private dpr = 1;
   private board: BoardRect | null = null;
   private mood = depthMood(0);
-  private probe: THREE.Mesh;
+  private seafloor = new Seafloor(this.scene);
+  private lights: THREE.Light[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -55,12 +57,18 @@ export class Stage3D implements Stage {
     );
     this.view = planeView(1, 1, FOV, CAM_Z);
 
-    // 정합 확인용 임시 사각형. Task 3 에서 자갈 해저가 대체한다.
-    this.probe = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ color: 0x33ff88, wireframe: true }),
+    // 조명 둘. 방향광이 자갈 알의 면을 갈라 입체를 만들고, 반구광이 물빛으로 받쳐 준다.
+    // 방향은 왼쪽 위 — 2D 타일을 굽던 조명 방향과 같아야 한 화면으로 읽힌다.
+    const key = new THREE.DirectionalLight(0xdff4ff, 1.15);
+    key.position.set(-0.6, 1, 0.8);
+    const fill = new THREE.HemisphereLight(
+      new THREE.Color(this.mood.top),
+      new THREE.Color(this.mood.bottom),
+      0.75,
     );
-    this.scene.add(this.probe);
+    this.lights = [key, fill];
+    this.scene.add(key, fill);
+    this.seafloor.setMood(this.mood);
 
     this.resize();
   }
@@ -86,8 +94,11 @@ export class Stage3D implements Stage {
     const cx = r.x + r.w / 2 - this.left;
     const cy = r.y + r.h / 2 - this.top;
     const c = screenToPlane(cx, cy, this.w, this.h, this.view);
-    this.probe.position.set(c.x, c.y, 0);
-    this.probe.scale.set(pxToWorld(r.w, this.view), pxToWorld(r.h, this.view), 1);
+    this.seafloor.layout(
+      { cx: c.x, cy: c.y, w: pxToWorld(r.w, this.view), h: pxToWorld(r.h, this.view) },
+      this.view,
+      Math.round(this.depth * 1000) + 7,
+    );
   }
 
   setView(_v: SceneView): void {}
@@ -103,15 +114,18 @@ export class Stage3D implements Stage {
 
   cheer(): void {}
   rescued(): void {}
-  step(_dt: number): void {}
+
+  step(dt: number): void {
+    this.seafloor.step(dt);
+  }
 
   render(): void {
     this.renderer.render(this.scene, this.camera);
   }
 
   dispose(): void {
-    this.probe.geometry.dispose();
-    (this.probe.material as THREE.Material).dispose();
+    this.seafloor.dispose();
+    for (const l of this.lights) this.scene.remove(l);
     this.scene.clear();
     this.renderer.dispose();
     this.renderer.forceContextLoss();

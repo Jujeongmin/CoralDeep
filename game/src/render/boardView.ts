@@ -7,7 +7,6 @@ import type { Blocker, Board, Phase, Special, Tile } from '../core/types.ts';
 import { idx } from '../core/types.ts';
 import { DIVER_SPAN } from './diverRig.ts';
 import { WaterLayer } from './water.ts';
-import { GravelField } from './gravel.ts';
 import { TILE_ART, bakedTile, clearBaked, preloadTiles } from '../tiles.ts';
 import { texturePattern } from '../textures.ts';
 import type { Stage } from '../render3d/types.ts';
@@ -128,9 +127,6 @@ export class BoardView {
   /** 흘러드는 물 (칸 단위가 아니라 하나의 액체 덩어리로 그린다) */
   private water = new WaterLayer();
 
-  /** 보드를 둘러싼 자갈 더미 (보드에 없는 칸을 메운다) */
-  private gravel = new GravelField();
-
   /** 에셋을 구워둘 픽셀 크기 (칸 크기 x 화면 배율) */
   private artSize = 64;
 
@@ -213,7 +209,6 @@ export class BoardView {
       : this.sceneH + Math.floor((boardH - this.cell * this.rows) / 2);
     this.artSize = Math.max(16, Math.round(this.cell * dpr));
     clearBaked();
-    this.gravel.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr, this.holes);
     this.water.setGrid(this.cols, this.rows, this.cell, this.originX, this.originY, dpr);
     this.water.syncFrom(this.passages);
     // 뷰포트 좌표로 넘긴다. 3D 캔버스는 이 캔버스와 다른 박스를 쓰므로
@@ -737,8 +732,7 @@ export class BoardView {
 
     const total = this.cols * this.rows;
 
-    // 자갈 더미 — 보드는 이 안에 파인 구멍이다
-    this.gravel.draw(ctx);
+    // 자갈 더미 — 3D 무대(Seafloor)가 보드보다 앞에서 그린다. 여기서는 안 그린다.
 
     // 장면과 자갈이 맞닿는 선. 그냥 두면 두 그림을 잘라 붙인 이음매가 그대로 보인다.
     // 위쪽 바위턱이 드리우는 그늘을 깔아 하나의 공간으로 잇는다.
