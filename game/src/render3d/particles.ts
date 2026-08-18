@@ -20,25 +20,34 @@
 // 보정과 수학적으로 같은 나눗셈을, 카메라가 이미 갖고 있는 투영 행렬로 그대로
 // 얻는 셈이다. 그래서 vNdc = clip.xy / clip.w 를 varying 으로 넘겨 프래그먼트에서
 // uHole 과 비교한다.
+//
+// vNdc 는 입자 '중심'의 화면 위치일 뿐이다 -- Points 는 gl_PointSize 만큼 중심 주위로
+// 퍼지므로, 중심이 구멍 밖이어도 반지름만큼은 보드 쪽으로 걸칠 수 있다. 처음에는 이
+// 여유를 고정 상수(0.03 NDC)로 어림했는데, 리뷰에서 "화면 CSS 폭이 ~287px 아래로
+// 좁아지면 그 상수로는 반지름을 다 못 덮는다"는 지적을 받았다 -- seafloor.ts 가 알의
+// 반지름을 어림했다가 세 번 깨진 것과 같은 종류의 실패다. gl_PointSize 는 정점마다
+// 이미 정확히 계산돼 있으므로, 그 값을 그대로 varying 으로 넘기고 프래그먼트에서
+// (CSS px 캔버스 크기, dpr) 로부터 유도한 정확한 px->NDC 배율을 곱해 이 입자만의
+// 여유를 만든다(pxToNdc.ts). 화면 폭에 상관없이 항상 정확하다.
 
 import * as THREE from 'three';
 
 import type { DepthMood } from '../render/depth.ts';
+import { clampDpr, cssSizeFromView, pxToNdc } from './pxToNdc.ts';
 import type { PlaneView } from './projection.ts';
 
 const MAX = 900;
 
 /**
- * 구멍 경계에 더하는 여유(NDC).
+ * 이 무대의 dpr 상한(stage.ts 의 MAX_DPR 과 같은 값이다).
  *
- * vNdc 는 입자 '중심'의 화면 위치다. Points 는 gl_PointSize 만큼 중심 주위로 퍼지므로
- * 중심이 구멍 밖이어도 반지름만큼은 보드 쪽으로 걸칠 수 있다. 이 프로젝트의 점 하나
- * 최대 지름은 uSize(6) * 최대 배율(0.5+sv=1.5) * 최대 원근 확대(10/(camZ-z), z=-0.5 일 때
- * 10/10.5 ~= 0.95) ~= 8.6px, 반지름 ~4.3px 이다. 화면 폭이 좁을수록 같은 px 여유가
- * 더 큰 NDC 폭을 먹으므로, 세로 화면 중 가장 좁게 잡는 기준(~360px)에서도 반지름을
- * 넉넉히 덮도록 0.03 으로 잡는다(360px 기준 0.03 NDC ~= 5.4px > 4.3px).
+ * Drift 는 렌더러를 안 들고 있어(생성자는 scene 하나만 받는다) 실제 dpr 을 stage.ts 로부터
+ * 전달받지 못한다. 대신 stage.ts 와 똑같이 window.devicePixelRatio 를 이 상한으로 직접
+ * 잘라 쓴다 -- 두 값이 어긋나면 gl_PointSize 가 실제로 그려지는 디바이스 px 단위와
+ * 여기서 구하는 px->NDC 배율의 단위가 안 맞게 된다. 프로젝트 전역 상수(전역 제약의
+ * "3D 캔버스 dpr 상한 1.5")이므로 값 자체를 새로 정하는 게 아니라 그대로 복제한다.
  */
-const HOLE_MARGIN = 0.03;
+const MAX_DPR = 1.5;
 
 export class Drift {
   private points: THREE.Points;
@@ -54,6 +63,10 @@ export class Drift {
   // 그 프레임은 렌더되지 않고(BoardView 생성자가 곧이어 setBoardRect 를 동기로 넘긴
   // 뒤에야 rAF 루프가 시작된다), 그 다음부터는 항상 실제 구멍 값이 들어온다.
   private uHole = { value: new THREE.Vector4(0, 0, 0, 0) };
+  // px(디바이스) 하나가 NDC 몇 폭인지 -- setMood() 가 매 리사이즈마다 다시 잰다.
+  // 기본값 0 은 uHole 과 같은 이유로 안전하다: 첫 setMood() 가 항상 첫 렌더보다
+  // 먼저 온다(Stage3D 생성자가 resize() 끝에서 부른다).
+  private uPxToNdc = { value: new THREE.Vector2(0, 0) };
   private quality = 1;
   private want = MAX;
 
@@ -74,6 +87,7 @@ export class Drift {
         uSize: this.uSize,
         uOpacity: this.uOpacity,
         uHole: this.uHole,
+        uPxToNdc: this.uPxToNdc,
       },
       transparent: true,
       depthWrite: false,
@@ -84,6 +98,7 @@ export class Drift {
         uniform float uSize;
         varying float vFade;
         varying vec2 vNdc;
+        varying float vPointPx;
         void main() {
           float sx = position.x;
           float sy = position.y;
@@ -96,6 +111,9 @@ export class Drift {
           vFade = 0.4 + sv * 0.6;
           vec4 mv = modelViewMatrix * vec4(x, y, z, 1.0);
           gl_PointSize = uSize * (0.5 + sv) * (10.0 / -mv.z);
+          // 이 입자의 실제 화면 지름(디바이스 px) -- 프래그먼트에서 이 입자만의
+          // 구멍 여유를 정확히 만드는 데 쓴다(고정 상수로 어림하지 않는다).
+          vPointPx = gl_PointSize;
           vec4 clip = projectionMatrix * mv;
           gl_Position = clip;
           // 화면 NDC -- 보드 구멍 판정을 여기서 만든 좌표로 한다(perspective divide 가
@@ -106,12 +124,20 @@ export class Drift {
       fragmentShader: `
         uniform float uOpacity;
         uniform vec4 uHole;
+        uniform vec2 uPxToNdc;
         varying float vFade;
         varying vec2 vNdc;
+        varying float vPointPx;
         void main() {
-          // 보드 사각형 안이면 그린다 -- 이 3D 장면은 보드 앞 레이어라 여기 그리면
-          // 타일을 덮는다.
-          if (vNdc.x > uHole.x && vNdc.x < uHole.z && vNdc.y > uHole.y && vNdc.y < uHole.w) {
+          // 이 입자 반지름(px)을 NDC 로 바꿔 구멍 경계에 더한다 -- vNdc 는 점의
+          // 중심일 뿐이라, 중심이 구멍 밖이어도 반지름만큼은 걸칠 수 있어서다.
+          vec2 margin = vec2(vPointPx * 0.5) * uPxToNdc;
+          // 보드 사각형(여유 포함) 안이면 그린다 -- 이 3D 장면은 보드 앞 레이어라
+          // 여기 그리면 타일을 덮는다.
+          if (
+            vNdc.x > uHole.x - margin.x && vNdc.x < uHole.z + margin.x &&
+            vNdc.y > uHole.y - margin.y && vNdc.y < uHole.w + margin.y
+          ) {
             discard;
           }
           vec2 d = gl_PointCoord - 0.5;
@@ -131,15 +157,25 @@ export class Drift {
     this.uOpacity.value = 0.22 + mood.snow * 0.42;
     this.want = Math.round(120 + mood.snow * (MAX - 120));
     this.applyCount();
+
+    // px->NDC 배율도 view 가 바뀔 때(=리사이즈마다) 다시 잰다. CSS 캔버스 크기는
+    // view 안에 이미 있는 값을 되짚고(cssSizeFromView), 실제 dpr 은 stage.ts 와 같은
+    // 방식으로 window 에서 직접 읽어 상한을 자른다.
+    const css = cssSizeFromView(view);
+    const dpr = clampDpr(window.devicePixelRatio, MAX_DPR);
+    const ndc = pxToNdc(css.w, css.h, dpr);
+    this.uPxToNdc.value.set(ndc.x, ndc.y);
   }
 
   /**
    * 보드 사각형 -- 화면 NDC(-1..1, y 위쪽) 기준, 이미 이 캔버스의 원점을 뺀 좌표에서
    * 호출부(Stage3D)가 변환해 넘긴다. 리사이즈·보드 이동마다 다시 불러 이 값을 갱신한다
-   * -- 캡처해 둔 상수가 아니라 매번 최신 사각형을 따라간다.
+   * -- 캡처해 둔 상수가 아니라 매번 최신 사각형을 따라간다. 점 반지름만큼의 여유는
+   * 여기서 더하지 않는다 -- 입자마다 크기가 달라 프래그먼트 셰이더가 vPointPx 로 직접
+   * 계산한다(위 셰이더 참고).
    */
   setBoardRectNdc(x0: number, y0: number, x1: number, y1: number): void {
-    this.uHole.value.set(x0 - HOLE_MARGIN, y0 - HOLE_MARGIN, x1 + HOLE_MARGIN, y1 + HOLE_MARGIN);
+    this.uHole.value.set(x0, y0, x1, y1);
   }
 
   /** 품질 티어 -- 1 = 그대로, 0.5 = 절반 */
