@@ -199,7 +199,11 @@ export class Seafloor {
           `#include <dithering_fragment>
            float c = wave(vWPos.xy, uTime * 0.6) + wave(vWPos.xy * 1.9 + 4.0, uTime * 0.37);
            c = smoothstep(0.7, 1.6, c);
-           gl_FragColor.rgb += vec3(0.30, 0.55, 0.62) * c * uCaustic;`,
+           // 색 자체도 낮췄다(0.30/0.55/0.62 -> 0.16/0.30/0.34) — 어두워진 바닥
+           // 위에서 코스틱만 예전 세기 그대로면 흰 줄무늬가 배경보다 튀어 다시
+           // '밝은 배경'으로 되돌아간다. uCaustic 계수 인하(setMood 참고)와
+           // 합쳐서 코스틱은 이제 은은한 그물무늬로만 보인다.
+           gl_FragColor.rgb += vec3(0.16, 0.30, 0.34) * c * uCaustic;`,
         );
       extra?.(shader);
     };
@@ -315,8 +319,12 @@ export class Seafloor {
       m.compose(pos, q, scl);
       this.mesh.setMatrixAt(n, m);
 
-      // 심해 암석 톤. 알마다 살짝 흔들어 한 덩어리로 안 보이게 한다.
-      const v = 0.34 + hash01(seed + i * 9.9) * 0.2;
+      // 심해 암석 톤. 알마다 살짝 흔들어 한 덩어리로 안 보이게 한다 — 다만 폭을
+      // 좁게 잡는다(0.2 -> 0.12). 배경이 타일과 겨루면 안 되는데, 알마다 밝기
+      // 편차가 크면(원래 0.34~0.54) 밝은 알이 타일만큼 눈에 띄어 버린다. setMood()
+      // 의 k 가 depthMood(t) 로 전체 밝기를 낮추는 동안, 이 폭은 그 위에 얹히는
+      // '알 사이 내부 대비'만 줄인다 -- 자갈 질감 자체는 남기고 산개비만 죽인다.
+      const v = 0.34 + hash01(seed + i * 9.9) * 0.12;
       color.setRGB(v * 0.62, v * 0.78, v);
       this.mesh.setColorAt(n, color);
       n++;
@@ -390,14 +398,27 @@ export class Seafloor {
     this.uMask.value = tex;
   }
 
-  /** 깊어질수록 바닥을 어둡게 — 2D 의 gloom 과 같은 역할 */
+  /**
+   * 깊어질수록 바닥을 어둡게 — 2D 의 gloom 과 같은 역할.
+   *
+   * 실측(라이브 WebGL 픽셀) 기준 얕은 레벨의 평균 밝기가 104, 피크가 192~214 로
+   * 나왔다 — 배경이 타일과 밝기를 겨루는 수준이다. 예전 식(1 - gloom*0.75)은
+   * gloom 최댓값(STOPS 의 0.9)에서도 k 가 0.325 까지밖에 안 떨어져, 가장 깊은
+   * 레벨도 '거의 검다'와는 거리가 멀었다. 새 식은 두 계수(절편·기울기)를 다시
+   * 잡아 얕은 레벨(gloom≈0.12)은 k≈0.5, 가장 깊은 레벨(gloom≈0.9)은 k≈0.07 이
+   * 되게 한다 — depthMood(t) 가 이미 연속으로 주는 gloom 을 그대로 타므로 30단계
+   * 전체에서 계속 매끄럽다. 자갈 자체를 새까맣게 죽이지 않도록(질감은 남아야
+   * 한다) 0 근처에서 한 번 더 clamp 한다.
+   */
   setMood(mood: DepthMood): void {
-    const k = 1 - mood.gloom * 0.75;
+    const k = Math.max(0.05, 0.56 - mood.gloom * 0.54);
     this.mat.color.setRGB(k, k, k);
     // 바닥판은 알보다 살짝 더 어둡게 — 알이 그 위에 얹힌 것처럼 도드라져 보인다.
     this.backingMat.color.setRGB(k * 0.8, k * 0.85, k * 0.9);
-    // 깊으면 수면 빛이 안 닿으므로 코스틱도 사라진다
-    this.uCaustic.value = mood.shafts * 0.55;
+    // 깊으면 수면 빛이 안 닿으므로 코스틱도 사라진다. 계수 자체도 낮췄다(0.55 ->
+    // 0.32) — 어두워진 바닥 위에서도 코스틱 파도(shader 의 uCaustic 곱)가 예전
+    // 계수 그대로면 다시 흰 피크를 만들어 어둡게 한 의미가 없어진다.
+    this.uCaustic.value = mood.shafts * 0.32;
   }
 
   step(dt: number): void {
