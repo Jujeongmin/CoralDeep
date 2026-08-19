@@ -189,15 +189,13 @@ export class Stage3D implements Stage {
    * 통한다("판자 위에 선다"는 게 중력 방향과 맞아야 자연스럽다). 보드를 아직
    * 모르거나(첫 프레임), 빈 띠가 보드 아래쪽에 있으면(미래에 보드가 위로 옮겨가는
    * 경우) 보드 접지는 "천장에 붙어 선다"가 되어 부자연스러우므로, 그때는 예전처럼
-   * 빈 띠 가운데에 띄운다. 두 번째 반환값(grounded)이 접지 여부다 -- diver.ts
-   * place() 가 이 값으로 흔들림을 접지선 위로만 움직일지, 예전처럼 위아래로 고르게
-   * 움직일지 가른다.
+   * 빈 띠 가운데에 띄운다.
    */
-  private standAnchorY(): { y: number; grounded: boolean } {
+  private standAnchorY(): number {
     const layout = this.bandLayoutPx();
-    if (layout?.aboveBoard) return { y: layout.boardTop, grounded: true };
+    if (layout?.aboveBoard) return layout.boardTop;
     const band = this.clearBand();
-    return { y: (0.5 - band.cy / this.view.worldH) * this.h, grounded: false };
+    return (0.5 - band.cy / this.view.worldH) * this.h;
   }
 
   setBoardRect(r: BoardRect): void {
@@ -236,24 +234,18 @@ export class Stage3D implements Stage {
     // 옮겨가 빈 띠가 아래가 되면(standAnchorY() 참고) 접지 대신 예전처럼 빈 띠
     // 가운데로 저절로 되돌아간다 -- 여기서 위/아래를 가정하지 않는다.
     const band = this.clearBand();
-    const stand = this.standAnchorY();
     const anchor = {
       x: (band.cx / this.view.worldW + 0.5) * this.w,
-      y: stand.y,
+      y: this.standAnchorY(),
     };
     // 대기 크기가 빈 띠보다 크면 가만히 있어도 보드를 침범한다 -- 띠 높이(10% 여유)에
     // 맞춰 잠수부 기준 칸 크기를 줄인다. 대부분의 레이아웃에서는 r.cell 그대로 쓴다.
-    // 접지 상태에서도 이 90% 상한은 여전히 안전하다 -- 최악(클램프가 걸려
-    // cellPx*CELLS_TALL 이 정확히 bandHeightPx*0.9)에도, 몸 높이 + 접지 안전
-    // 여유(대략 몸 높이의 6.5%, diver.ts 의 standingTiltReachPx 호출부 참고)를
-    // 더한 값이 bandHeightPx*0.9*1.065 ≈ bandHeightPx*0.96 로 여전히 1 미만이라
-    // 흔들림에 쓸 여유가 항상 양수로 남는다(diver.ts 의 maxStandingBobWorld 가
-    // 이 여유를 Math.max(0, ...) 로 한 번 더 지키므로 음수가 되어도 0 으로 죈다).
-    // bandHeightPx 는 place() 에 그대로 넘긴다 -- 흔들림(bob) 상한도 같은 빈 띠
-    // 안에서 계산해야 하기 때문이다(diver.ts 참고).
+    // 잠수부는 이제 대기 중 완전히 정지하므로(흔들림 없음, diver.ts 참고) 이 90%
+    // 상한이 곧 실제 접지 여유 전부다 -- 몸 높이가 bandHeightPx*0.9 를 넘지 않으면
+    // 그걸로 침범 불변식이 끝난다(diver.test.ts 가 이 계산을 그대로 검증한다).
     const bandHeightPx = band.h * this.view.pxPerWorld;
     const cellPx = Math.min(r.cell, (bandHeightPx * 0.9) / CELLS_TALL);
-    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z, bandHeightPx, stand.grounded);
+    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z);
   }
 
   setView(v: SceneView): void {

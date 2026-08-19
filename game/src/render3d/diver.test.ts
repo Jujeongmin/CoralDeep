@@ -1,25 +1,29 @@
-// 잠수부의 대기 중 흔들림이 빈 띠(clearBand)를 벗어나지 않는지 검증.
+// 잠수부 검증.
+//
+// 예전에는 대기 중 흔들림(bob)이 빈 띠(clearBand)를 벗어나지 않는지가 이 파일의
+// 핵심이었다 — 사용자 요청으로 그 흔들림 자체를 없앴으므로(diver.ts step() 참고,
+// 이제 대기 중엔 완전히 정지한다) 전제가 바뀌었다. 이 파일은 새 현실을 검증한다:
+//  1) 흔들림이 없는 정적 크기만으로도 침범 불변식이 성립한다는 것(옛 클램프 여유
+//     계산의 자리를 대신한다).
+//  2) 접지 위치에 더 이상 안전 여유(reachPx)가 없다는 것 — place() 는 이제
+//     anchor 를 그대로 심는다.
+//  3) 실제로 구운 diver.glb 를 읽어, 대기 중 유일하게 남은 움직임(Idle 스켈레탈
+//     정점 애니메이션)이 발을 얼마나 움직이는지 데이터로 확인한다.
 //
 // diver.ts 는 Diver 클래스가 constructor(private scene: THREE.Scene) 같은 TS
 // parameter property 를 써서 npm test 의 Node 내장 strip-only 로더로 못 읽는다
-// (depthProjection.ts 상단 주석 참고 — seafloor.ts 와 같은 이유다). 그래서 흔들림
-// 상한을 계산하는 순수 수학(maxIdleBobWorld 와 그 재료인 screenDelta /
-// worldDeltaForScreen)은 depthProjection.ts 에 있고, 여기서는 그 함수들과 diver.ts /
-// stage.ts 양쪽의 상수를 그대로 옮겨 적어 실제 파이프라인을 재현한다 — 값을 바꾸면
-// 여기도 같이 맞춰야 한다.
+// (depthProjection.ts 상단 주석 참고 — seafloor.ts 와 같은 이유다). glb.ts 와
+// bakedAnim.ts 는 순수 함수/평범한 인터페이스라 문제없이 임포트할 수 있다 —
+// 실제 구운 파일을 그대로 읽어 검증하는 3번 테스트가 가능한 이유다.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import {
-  depthScale,
-  maxIdleBobWorld,
-  maxStandingBobWorld,
-  screenDelta,
-  standingTiltReachPx,
-  worldDeltaForScreen,
-} from './depthProjection.ts';
-import { planeView } from './projection.ts';
+import { unpackAnimFrames } from './bakedAnim.ts';
+import { depthScale } from './depthProjection.ts';
+import { parseGlb } from './glb.ts';
+import { planeView, screenToPlane } from './projection.ts';
 
 const CAM_Z = 10;
 const FOV = 45;
@@ -27,152 +31,97 @@ const FOV = 45;
 const HOME_Z = 1.2;
 /** diver.ts 의 CELLS_TALL */
 const CELLS_TALL = 1.9;
-/** diver.ts 의 MODEL_WIDTH_RATIO — diver.glb 버텍스 바운딩 박스 실측(약 0.336)을 올려 잡았다 */
-const MODEL_WIDTH_RATIO = 0.34;
-/** diver.ts step() 의 흔들림 식: bob = (0.06+0.035) * amp, amp = 1 + danger*1.8 */
-const BOB_COEFF = 0.06 + 0.035;
-const AMP_AT_MAX_DANGER = 1 + 1 * 1.8;
-/** diver.ts step() 의 기울기(tilt) 식: tilt = (0.09+0.05) * amp — place() 의 접지 안전 여유가 쓴다 */
-const TILT_COEFF = 0.09 + 0.05;
 /** stage.ts setBoardRect() 의 대기 크기 클램프 여유 */
 const REST_MARGIN = 0.9;
 
-test('worldDeltaForScreen 은 screenDelta 의 역함수다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
-  const world = worldDeltaForScreen(CAM_Z, HOME_Z, 40, view.pxPerWorld);
-  const backToScreen = screenDelta(CAM_Z, HOME_Z, world, view.pxPerWorld);
-  assert.ok(Math.abs(backToScreen - 40) < 1e-9);
+// ---- 1) 흔들림 없는 정적 크기가 빈 띠를 넘지 않는다 ----
+//
+// stage.ts 는 cellPx = min(r.cell, bandHeightPx*REST_MARGIN/CELLS_TALL) 로 잠수부
+// 기준 칸 크기를 정한다. 흔들림이 있던 시절엔 이 위에 bob/tilt 여유를 또 계산해야
+// 했지만(옛 maxIdleBobWorld/maxStandingBobWorld), 이제 몸은 완전히 정지하므로
+// heightPx = cellPx*CELLS_TALL 이 bandHeightPx 를 넘지 않는 것만으로 침범 불변식이
+// 끝난다 — 클램프 공식 자체가 그 상한을 강제한다는 걸 수로 확인한다.
+test('정지 상태: 클램프된 대기 크기(cellPx*CELLS_TALL)는 어떤 빈 띠에서도 그 빈 띠를 넘지 않는다', () => {
+  for (const [rCell, bandHeightPx] of [
+    [40, 600], // 여유로운 빈 띠 -- 클램프가 안 걸리는 경우
+    [200, 120], // 빡빡한 빈 띠 -- 클램프가 실제로 걸리는 경우
+    [10, 8], // 극단적으로 좁은 빈 띠
+  ]) {
+    const cellPx = Math.min(rCell, (bandHeightPx * REST_MARGIN) / CELLS_TALL);
+    const heightPx = cellPx * CELLS_TALL;
+    assert.ok(
+      heightPx <= bandHeightPx + 1e-9,
+      `heightPx(${heightPx}) 가 bandHeightPx(${bandHeightPx}) 를 넘었다 (rCell=${rCell})`,
+    );
+  }
 });
 
-test('screenDelta: 카메라에 가까운 HOME_Z 에서는 같은 world 변위가 z=0 보다 화면에서 더 크게 보인다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
-  const atHome = screenDelta(CAM_Z, HOME_Z, 1, view.pxPerWorld);
-  const atZero = screenDelta(CAM_Z, 0, 1, view.pxPerWorld);
-  assert.ok(atHome > atZero);
-  // 리뷰가 독립적으로 재도출한 배율(1 / depthScale(camZ, HOME_Z) ≈ 1.136)과 정확히 일치해야 한다
-  assert.ok(Math.abs(atHome / atZero - 1 / depthScale(CAM_Z, HOME_Z)) < 1e-9);
-});
-
-test('maxIdleBobWorld: 빈 띠가 넉넉하면 흔들림을 거의 안 줄인다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
-  const heightPx = 90; // cellPx * CELLS_TALL 정도
-  const bandHeightPx = 600; // 대기 크기의 몇 배나 되는 넉넉한 띠
-  const maxBob = maxIdleBobWorld(heightPx, bandHeightPx, MODEL_WIDTH_RATIO, CAM_Z, HOME_Z, view.pxPerWorld);
-  const worstBobWorld = BOB_COEFF * AMP_AT_MAX_DANGER;
-  assert.ok(maxBob >= worstBobWorld); // 넉넉하면 애초에 클램프가 걸리지 않아야 한다
-});
-
-test('danger=1 최대 흔들림 + 회전 실루엣 + 대기 크기가, 클램프가 실제로 작동하는 타이트한 빈 띠 안에 들어온다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
-
-  // 일부러 빡빡하게 잡는다 -- stage.ts 의 클램프(cellPx = min(r.cell, bandHeightPx*0.9/CELLS_TALL))
-  // 가 실제로 작동하는 영역이어야 이 테스트가 뜻이 있다.
-  const bandHeightPx = 120;
-  const rCell = 200; // 클램프가 걸리도록 충분히 큰 칸
-  const cellPx = Math.min(rCell, (bandHeightPx * REST_MARGIN) / CELLS_TALL);
-  assert.ok(cellPx < rCell, '이 테스트는 클램프가 걸리는 시나리오를 가정한다');
-  const heightPx = cellPx * CELLS_TALL;
-
-  const maxBobWorld = maxIdleBobWorld(
-    heightPx,
-    bandHeightPx,
-    MODEL_WIDTH_RATIO,
-    CAM_Z,
-    HOME_Z,
-    view.pxPerWorld,
-  );
-  const worstBobWorld = BOB_COEFF * AMP_AT_MAX_DANGER;
-  // diver.ts step() 이 실제로 하는 클램프
-  const clampedBobWorld = Math.min(worstBobWorld, maxBobWorld);
-  assert.ok(clampedBobWorld < worstBobWorld, '이 시나리오에서는 클램프가 실제로 흔들림을 줄여야 한다');
-
-  const bobScreenPx = screenDelta(CAM_Z, HOME_Z, clampedBobWorld, view.pxPerWorld);
-  // 어떤 각도로 기울어도 실루엣은 이 반지름의 원을 벗어나지 않는다
-  const rotationReachPx = (heightPx / 2) * (Math.hypot(1, MODEL_WIDTH_RATIO) - 1);
-
-  const totalReachPx = heightPx / 2 + rotationReachPx + bobScreenPx;
-  assert.ok(
-    totalReachPx <= bandHeightPx / 2 + 1e-6,
-    `흔들림 + 회전 + 대기 크기(${totalReachPx}px)가 빈 띠 절반(${bandHeightPx / 2}px)을 넘었다`,
-  );
-});
-
-// ---- 접지(발이 보드 윗변에 선) 시나리오 -- diver.ts place()/step() 이 grounded=true
-// 일 때 쓰는 경로. 발이 회전축이라(diver.glb 정규화가 y=0 을 발로 잡는다, 위 파일
-// 헤더 주석 참고) 제자리에서는 안 움직이지만, 발 옆 폭 때문에 기울면 접지선
-// 아래로 살짝 파고들 수 있다 -- standingTiltReachPx() 가 그 몫을 계산하고,
-// place() 는 그만큼 접지선보다 위로 몸을 세워 최악에도 접지선을 넘지 않게 한다.
-
-test('standingTiltReachPx: 접지선 위로 세운 안전 여유만큼만 최악의 기울기가 파고든다 (직접 회전한 값과 일치)', () => {
-  const heightPx = 90;
-  const tiltMaxRad = TILT_COEFF * AMP_AT_MAX_DANGER;
-  const reachPx = standingTiltReachPx(heightPx, MODEL_WIDTH_RATIO, tiltMaxRad);
-
-  // standingTiltReachPx() 의 닫힌 식이 맞는지, 실제 회전 공식(y' = x·sinθ + y·cosθ)
-  // 으로 발 옆 가장 바깥 점(y=0, x=∓width/2·heightPx)을 직접 굴려서 대조한다.
-  const halfWidthPx = (MODEL_WIDTH_RATIO / 2) * heightPx;
-  const rotatedY = -halfWidthPx * Math.sin(tiltMaxRad) + 0 * Math.cos(tiltMaxRad);
-  assert.ok(
-    Math.abs(-rotatedY - reachPx) < 1e-9,
-    `닫힌 식(${reachPx})과 직접 회전(${-rotatedY})이 어긋났다`,
-  );
-  assert.ok(reachPx > 0, '기울기가 있으면 접지 안전 여유도 0보다 커야 한다');
-});
-
-test('maxStandingBobWorld: 빈 띠가 넉넉하면 흔들림을 거의 안 줄인다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
-  const heightPx = 90;
+test('정지 상태: 여유로운 빈 띠에서는 클램프가 안 걸려 r.cell 그대로 쓴다', () => {
+  const rCell = 40;
   const bandHeightPx = 600;
-  const reachPx = standingTiltReachPx(heightPx, MODEL_WIDTH_RATIO, TILT_COEFF * AMP_AT_MAX_DANGER);
-  const maxBob = maxStandingBobWorld(heightPx, bandHeightPx, reachPx, CAM_Z, HOME_Z, view.pxPerWorld);
-  // 접지 상태의 흔들림은 위로만 움직이므로 최악의 폭은 2*BOB_COEFF*amp (place() 주석 참고)
-  const worstBobWorld = 2 * BOB_COEFF * AMP_AT_MAX_DANGER;
-  assert.ok(maxBob >= worstBobWorld); // 넉넉하면 애초에 클램프가 걸리지 않아야 한다
+  const cellPx = Math.min(rCell, (bandHeightPx * REST_MARGIN) / CELLS_TALL);
+  assert.equal(cellPx, rCell);
 });
 
-test('접지 상태: danger=1 최악의 흔들림·기울기에도 발이 접지선(보드 윗변) 아래로 내려가지 않는다', () => {
-  const view = planeView(400, 800, FOV, CAM_Z);
+// ---- 2) place() 는 이제 anchor 를 그대로 심는다(추가 여유 없음) ----
+//
+// 예전엔 접지 상태에서 standingTiltReachPx() 만큼 anchor 보다 위로 몸을 세웠다
+// (기울기가 접지선을 파고들지 않게 하는 안전 여유). 기울기 자체가 없어졌으므로
+// place() 의 새 공식은 depthScale·screenToPlane 만으로 anchor 를 그대로 옮긴다 —
+// 그 공식이 정말 anchor 와 정확히 대응하는지(왕복하면 원래 화면 좌표로 돌아오는지)
+// 확인한다.
+test('place(): 접지선에 심은 자리를 다시 화면으로 투영하면 원래 anchor 로 돌아온다(추가 여유 없음)', () => {
+  const screenW = 400;
+  const screenH = 800;
+  const view = planeView(screenW, screenH, FOV, CAM_Z);
+  const anchor = { x: 173.4, y: 210.8 };
 
-  // 일부러 빡빡하게 잡는다 -- stage.ts 의 클램프가 실제로 작동하는 영역이어야
-  // 이 테스트가 뜻이 있다.
-  const bandHeightPx = 120;
-  const rCell = 200;
-  const cellPx = Math.min(rCell, (bandHeightPx * REST_MARGIN) / CELLS_TALL);
-  assert.ok(cellPx < rCell, '이 테스트는 클램프가 걸리는 시나리오를 가정한다');
-  const heightPx = cellPx * CELLS_TALL;
+  // diver.ts place() 가 실제로 하는 계산 그대로.
+  const k = depthScale(CAM_Z, HOME_Z);
+  const p = screenToPlane(anchor.x, anchor.y, screenW, screenH, view);
+  const home = { x: p.x * k, y: p.y * k };
 
-  // place() 가 실제로 하는 계산
-  const tiltMaxRad = TILT_COEFF * AMP_AT_MAX_DANGER;
-  const reachPx = standingTiltReachPx(heightPx, MODEL_WIDTH_RATIO, tiltMaxRad);
-  // home 은 접지선(anchor)보다 reachPx 만큼 위에 선다(diver.ts place() 참고) --
-  // 화면 px 로 보면 발의 실제 "쉬는 자리"는 접지선에서 reachPx 만큼 뜬 상태다.
+  // 화면 px <-> z=0 평면 world 는 상수배(screenToPlane 은 선형)이므로, home 을
+  // 같은 배율로 되돌리면 정확히 anchor 가 나와야 한다(오프셋이 없다는 뜻).
+  const backX = (home.x / k / view.worldW + 0.5) * screenW;
+  const backY = (0.5 - home.y / k / view.worldH) * screenH;
+  assert.ok(Math.abs(backX - anchor.x) < 1e-9);
+  assert.ok(Math.abs(backY - anchor.y) < 1e-9);
+});
 
-  // 최악의 기울기가 발 옆 지점을 접지선 쪽으로 끌어내리는 양은 정확히 reachPx
-  // 이다(standingTiltReachPx() 의 정의 자체가 그 값이다) -- 그래서 발이 실제로
-  // 도달하는 가장 낮은 지점은 anchor(reachPx 위) - reachPx(기울기로 내려간 만큼)
-  // = anchor, 즉 접지선 그 자체다. bob 은 항상 위로만(>=0) 움직이므로 이 결론에
-  // 더 내려가는 방향으로 기여하지 않는다 -- 그래서 "접지선을 넘지 않는다"는
-  // reachPx 의 정의만으로 이미 보장된다(추가로 못 넘는지 다시 재는 게 아니라,
-  // 넘는 만큼을 정확히 상쇄하도록 설계했다는 뜻). 아래에서는 이 관계를 수로
-  // 확인한다.
-  const worstDipBelowAnchorPx = reachPx; // standingTiltReachPx 의 정의
-  const netIntrusionBelowGroundLinePx = worstDipBelowAnchorPx - reachPx;
-  assert.ok(
-    netIntrusionBelowGroundLinePx <= 1e-9,
-    `최악의 기울기에도 접지선을 넘으면 안 된다 (침범 ${netIntrusionBelowGroundLinePx}px)`,
-  );
+// ---- 3) 실제로 구운 diver.glb 를 읽어 대기 중 유일한 움직임을 확인한다 ----
 
-  // 위쪽 여유(흔들림 + 몸 높이 + 접지 안전 여유)는 빈 띠를 벗어나면 안 된다 --
-  // 화면(캔버스) 밖으로 나가지 않는지 확인한다.
-  const maxBobWorld = maxStandingBobWorld(heightPx, bandHeightPx, reachPx, CAM_Z, HOME_Z, view.pxPerWorld);
-  const worstBobWorld = 2 * BOB_COEFF * AMP_AT_MAX_DANGER; // step() 의 bobUp 최댓값
-  const clampedBobWorld = Math.min(worstBobWorld, maxBobWorld);
-  assert.ok(clampedBobWorld < worstBobWorld, '이 시나리오에서는 클램프가 실제로 흔들림을 줄여야 한다');
+const glbUrl = new URL('../assets/sprites3d/diver.glb', import.meta.url);
+const glbBuf = readFileSync(glbUrl);
+// Buffer.buffer 는 풀링 때문에 여분 바이트를 가질 수 있다 -- byteOffset/byteLength 로 정확히 자른다.
+const mesh = parseGlb(glbBuf.buffer.slice(glbBuf.byteOffset, glbBuf.byteOffset + glbBuf.byteLength) as ArrayBuffer);
 
-  const bobScreenPx = screenDelta(CAM_Z, HOME_Z, clampedBobWorld, view.pxPerWorld);
-  const totalUpwardReachPx = heightPx + reachPx + bobScreenPx;
-  assert.ok(
-    totalUpwardReachPx <= bandHeightPx + 1e-6,
-    `몸 높이 + 접지 여유 + 흔들림(${totalUpwardReachPx}px)이 빈 띠(${bandHeightPx}px)를 넘었다`,
-  );
+/** 대기 중 잠수부의 대략적인 화면 높이(px) — 82px 는 bake-diver-glb.mjs 검증
+ * 로그가 쓰는 것과 같은 기준값(전형적인 칸 크기 기준 실측)이다. */
+const TYPICAL_HEIGHT_PX = 82;
+
+test('Idle 클립: 발 정점(frame0 y<0.03)이 루프 전체에서 사실상 안 움직인다(1px 미만)', () => {
+  assert.ok(mesh.anim, 'mesh.anim 이 없다 -- Idle 클립이 안 구워졌다');
+  const frames = unpackAnimFrames(mesh.position, mesh.anim!);
+  const vertexCount = mesh.position.length / 3;
+
+  const footVerts: number[] = [];
+  for (let vi = 0; vi < vertexCount; vi++) if (mesh.position[vi * 3 + 1] < 0.03) footVerts.push(vi);
+  assert.ok(footVerts.length > 0, '발 정점을 하나도 못 찾았다 -- 정규화 기준이 바뀌었을 수 있다');
+
+  let maxRangeSq = 0;
+  for (const vi of footVerts) {
+    const mn = [Infinity, Infinity, Infinity];
+    const mx = [-Infinity, -Infinity, -Infinity];
+    for (const f of frames) {
+      for (let a = 0; a < 3; a++) {
+        mn[a] = Math.min(mn[a], f[vi * 3 + a]);
+        mx[a] = Math.max(mx[a], f[vi * 3 + a]);
+      }
+    }
+    const dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
+    maxRangeSq = Math.max(maxRangeSq, dx * dx + dy * dy + dz * dz);
+  }
+  const maxRangePx = Math.sqrt(maxRangeSq) * TYPICAL_HEIGHT_PX;
+  assert.ok(maxRangePx < 1, `발 정점이 ${maxRangePx.toFixed(3)}px 나 움직인다 -- 대기 중 정지 전제가 깨졌다`);
 });

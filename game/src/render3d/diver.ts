@@ -1,18 +1,13 @@
 // 잠수부.
 //
-// 몸 전체 움직임(오르내림·기울기·요)은 관절이 아니라 사인파로 만든다. 물에 뜬
-// 사람은 팔다리를 휘젓는 게 아니라 천천히 오르내리며 좌우로 기운다. 주기가
-// 어긋나는 사인 둘을 겹친다 — 하나만 쓰면 시계추처럼 규칙적이라 기계로 보인다.
-// 위급하면 속도와 폭만 커진다.
-// (2D 의 diverRig.ts 가 쓰던 규칙 그대로다. 저폴리 모델을 관절로 꺾으면 이음매가
-//  벌어져 종이인형이 되므로 그때도 몸 전체로 움직였다.)
-//
-// 그 위에 diver.glb 에 구워 넣은 Idle 스켈레탈 애니메이션(가슴 호흡, 팔 흔들림 등
-// 진짜 관절 움직임)을 정점 단위로 얹는다. 런타임은 스키닝을 하지 않는다 — glb 에
-// 이미 몇 프레임의 정점 위치가 미리 스킨되어 들어 있고(tools/bake-diver-glb.mjs),
-// 여기서는 두 프레임 사이를 선형보간해 매 프레임 position 버퍼를 다시 쓸 뿐이다.
-// 원본 Idle 클립(1.667초)보다 훨씬 느리게 돌린다 — 관절 애니메이션이라기보다
-// 물속에서 부유하며 숨쉬는 정도로 읽혀야 한다.
+// 대기 중에는 완전히 정지한다 — 몸 전체를 사인파로 오르내리던 예전 방식(둥둥
+// 뜨는 연출)은 없앴다. 발은 접지선(보드 윗변)에 고정, 몸통도 그 자리에 그대로
+// 선다. 그 위에 diver.glb 에 구워 넣은 Idle 스켈레탈 애니메이션(가슴 호흡, 팔
+// 흔들림 등 진짜 관절 움직임)만 정점 단위로 얹는다 — 발끝은 사실상 안 움직이고
+// (아래 IDLE_ANIM_LOOP_SECONDS 주석·diver.test.ts 의 실측 참고) 몸통·팔만
+// 살아있는 느낌을 준다. 런타임은 스키닝을 하지 않는다 — glb 에 이미 몇 프레임의
+// 정점 위치가 미리 스킨되어 들어 있고(tools/bake-diver-glb.mjs), 여기서는 두
+// 프레임 사이를 선형보간해 매 프레임 position 버퍼를 다시 쓸 뿐이다.
 //
 // 잠수부는 z=0 이 아니라 카메라 쪽(z>0)에 뜬다 — 3D 캔버스가 보드보다 앞이므로
 // 탈출 중에도 타일에 가리려면 카메라와 더 가까워야 한다. screenToPlane() 은 z=0
@@ -23,12 +18,7 @@
 import * as THREE from 'three';
 
 import { sampleAnimFrame, unpackAnimFrames } from './bakedAnim.ts';
-import {
-  depthScale,
-  maxIdleBobWorld,
-  maxStandingBobWorld,
-  standingTiltReachPx,
-} from './depthProjection.ts';
+import { depthScale } from './depthProjection.ts';
 import { type GlbAnim, parseGlb } from './glb.ts';
 import { type PlaneView, pxToWorld, screenToPlane } from './projection.ts';
 import type { DescentPoint } from './types.ts';
@@ -52,32 +42,26 @@ const HOME_Z = 1.2;
 const DESCENT_Z = 1.0;
 
 /**
- * diver.glb 버텍스 바운딩 박스 실측(X extent / Y extent ≈ 0.336, 살짝 올려 잡았다).
- * 대기 중 흔들림이 빈 띠를 넘는지 계산할 때(maxIdleBobWorld) 몸이 기울어도(tilt)
- * 실루엣이 세운 키의 절반을 얼마나 넘길 수 있는지 잡는 데 쓴다.
- */
-const MODEL_WIDTH_RATIO = 0.34;
-
-/**
- * step() 의 흔들림(bob)·기울기(tilt) 사인 두 항의 진폭 합, 그리고 danger=1(최악)
- * 일 때의 진폭 배수. step() 의 실제 공식(bob/tilt 각 사인 항의 계수, amp 공식)과
- * 값을 맞춰야 한다 — place() 가 이 상수들로 접지 안전 여유(standingTiltReachPx)와
- * 최악의 흔들림 폭을 미리 계산해 둔다.
- */
-const BOB_COEFF = 0.06 + 0.035;
-const TILT_COEFF = 0.09 + 0.05;
-const DANGER_AMP_GAIN = 1.8;
-const MAX_DANGER_AMP = 1 + DANGER_AMP_GAIN;
-
-/**
  * Idle 루프 한 바퀴를 재생하는 데 걸리는 시간(초). 원본 클립은 1.667초(30fps
  * 50프레임)로 실제 사람이 서 있는 속도다 — 그대로 틀면 "관절이 움직이는 애니메이션"
- * 으로 읽혀 부유감이 안 산다. 사용자 요청대로 느리게 튼다: 4배 이상 늘려 숨쉬듯
- * 잔잔하게 움직이게 한다. this.t 로 위상을 잡으므로(아래 step()) danger 가 커지면
- * (this.t 자체가 빨리 흐른다) 이 루프도 같이 빨라진다 — "위급하면 속도가 커진다"
- * 는 기존 규칙과 일관된다.
+ * 으로 읽혀 부유감이 안 산다. 느리게 튼다: 4배 이상 늘려 숨쉬듯 잔잔하게 움직이게
+ * 한다. this.t 로 위상을 잡으므로(아래 step()) danger 가 커지면(this.t 자체가
+ * 빨리 흐른다) 이 루프도 같이 빨라진다 — "위급하면 속도가 커진다"는 기존 규칙과
+ * 일관된다.
+ *
+ * 발은 이 클립으로도 사실상 안 움직인다 — 구운 프레임을 실측하면 frame0(y=0)
+ * 근처 정점들이 루프 전체에서 최대 0.0029(정규화 모델 좌표, 전신 높이=1) 만
+ * 움직인다. 전신 높이 82px 기준 약 0.2px — 화면에서 안 보이는 잔류 움직임이다
+ * (diver.test.ts 가 이 실측치를 그대로 회귀 검증한다).
  */
 const IDLE_ANIM_LOOP_SECONDS = 7;
+
+/**
+ * "위급하면 속도가 커진다"는 규칙 — this.t(애니메이션 위상 시계) 가 실제 시간보다
+ * 빨리 흐르게 한다. Idle 의 호흡·팔 흔들림에 그대로 적용된다(같은 this.t 를
+ * 공유하므로).
+ */
+const DANGER_TIME_SCALE = 1.6;
 
 export class Diver {
   private mesh: THREE.Mesh | null = null;
@@ -94,15 +78,6 @@ export class Diver {
   private home = new THREE.Vector3();
   private homeScreen = { x: 0, y: 0 };
   private homeScale = 1;
-  /** 대기 중 흔들림이 넘으면 안 되는 world 진폭 상한 — place() 가 빈 띠 크기로 잡는다 */
-  private maxBobWorld = 0;
-  /**
-   * 발이 보드 위 접지선에 서 있는가(place() 가 결정). true 면 흔들림은 접지선
-   * 위로만(never down) 움직인다 — false(빈 띠 가운데에 뜬 옛 배치, stage.ts 의
-   * clearBand() 가 보드 아래쪽에 있다고 판단했을 때의 대체 경로)면 예전처럼
-   * 위아래로 고르게 흔든다.
-   */
-  private grounded = false;
   private descent: DescentPoint | null = null;
   /** load() 가 아직 fetch 중일 때 dispose() 가 불리면 죽은 scene 에 메시를 넣지 않는다 */
   private disposed = false;
@@ -196,24 +171,24 @@ export class Diver {
   }
 
   /**
-   * 장면 안 제자리 (탈출 전).
+   * 장면 안 제자리 (탈출 전). 발(또는 빈 띠 중심)을 anchor 에 그대로 심는다 —
+   * 흔들림이 없으므로 여유를 미리 계산해 둘 필요가 없다(예전에는 여기서 접지 안전
+   * 여유·흔들림 상한을 함께 잡았다 — e182f33/이번 변경 전 이력 참고).
    * @param anchor 화면 px (호출부의 캔버스 로컬 기준 — Stage3D 가 자기 캔버스 기준으로 준다).
-   *   grounded 가 true 면 발이 닿는 접지선(보드 윗변) 그 자체다 — 발이 모델 원점
+   *   접지 상태면 발이 닿는 접지선(보드 윗변) 그 자체다 — 발이 모델 원점
    *   (y=0, tools/bake-diver-glb.mjs 의 정규화 참고)이라 anchor 를 그대로 심으면
-   *   발이 거기 선다.
+   *   발이 거기 선다. 비접지(빈 띠 중심에 뜬 대체 배치)면 anchor 가 빈 띠 중심이다.
    * @param cellPx 대기 크기 기준 칸 px — 이미 빈 띠 높이에 맞춰 줄어 있을 수 있다
    *   (stage.ts 의 클램프 참고).
    * @param camZ 카메라와 z=0 평면 사이 거리(stage.ts 의 CAM_Z). 잠수부가 z=0 이 아닌
    *   HOME_Z 에 있어 원근 보정에 필요하다 — seafloor.ts/waterVolume.ts 와 같은 이유로
    *   하드코딩하지 않고 호출부가 실제 카메라 값을 넘긴다.
-   * @param bandHeightPx 잠수부가 들어앉은 빈 띠의 화면 px 높이. 대기 크기가 이 안에
-   *   들어오게 이미 잡혀 있어도, 그 위에 얹는 흔들림(step() 의 bob)까지 빈 띠를
-   *   넘지 않게 여기서 안전 진폭을 미리 계산해 둔다(maxBobWorld).
-   * @param grounded true 면 anchor 가 보드 윗변(접지선)이다 — 발을 그 위에 세우고,
-   *   흔들림은 접지선 위로만 움직이게 한다(step() 참고). false 면 예전처럼 빈 띠
-   *   가운데에 띄운다(stage.ts 의 clearBand()/standAnchorY() 참고 — 보드가 위로
-   *   옮겨가 빈 띠가 보드 아래쪽에 생기면 "위로 접지"가 천장에 붙어 서는 꼴이라
-   *   부자연스러워서 쓰는 대체 경로다).
+   *
+   * 접지 여부(grounded)는 더 이상 인자로 안 받는다 — 흔들림이 있던 시절엔 접지
+   * 상태(발이 고정축)와 비접지 상태가 서로 다른 여유 계산식을 썼지만, 흔들림
+   * 자체가 없어진 지금은 두 경로가 완전히 같은 식(anchor 를 그대로 심는다)이라
+   * 분기가 죽은 코드였다 — 호출부(stage.ts)가 anchor 를 이미 두 경우에 맞게 골라
+   * 넘긴다(standAnchorY() 참고).
    */
   place(
     anchor: { x: number; y: number },
@@ -222,29 +197,11 @@ export class Diver {
     screenH: number,
     cellPx: number,
     camZ: number,
-    bandHeightPx: number,
-    grounded: boolean,
   ): void {
     this.homeScreen = anchor;
-    this.grounded = grounded;
     const k = depthScale(camZ, HOME_Z);
-    const heightPx = cellPx * CELLS_TALL;
-
-    if (grounded) {
-      // 발이 회전축이라(위 anchor 주석 참고) 제자리에서는 기울어도 안 움직이지만,
-      // 발 옆으로 뻗은 폭 때문에 몸이 기울면 발 옆 지점이 접지선 아래로 살짝
-      // 파고들 수 있다(standingTiltReachPx() 참고) — 그 몫만큼 접지선보다 위로
-      // 세워 최악의 기울기에도 보드를 안 넘게 한다.
-      const tiltMaxRad = TILT_COEFF * MAX_DANGER_AMP;
-      const reachPx = standingTiltReachPx(heightPx, MODEL_WIDTH_RATIO, tiltMaxRad);
-      const p = screenToPlane(anchor.x, anchor.y - reachPx, screenW, screenH, view);
-      this.home.set(p.x * k, p.y * k, HOME_Z);
-      this.maxBobWorld = maxStandingBobWorld(heightPx, bandHeightPx, reachPx, camZ, HOME_Z, view.pxPerWorld);
-    } else {
-      const p = screenToPlane(anchor.x, anchor.y, screenW, screenH, view);
-      this.home.set(p.x * k, p.y * k, HOME_Z);
-      this.maxBobWorld = maxIdleBobWorld(heightPx, bandHeightPx, MODEL_WIDTH_RATIO, camZ, HOME_Z, view.pxPerWorld);
-    }
+    const p = screenToPlane(anchor.x, anchor.y, screenW, screenH, view);
+    this.home.set(p.x * k, p.y * k, HOME_Z);
 
     this.homeScale = pxToWorld(cellPx * CELLS_TALL, view) * k;
     if (this.mesh && !this.descent) this.mesh.scale.setScalar(this.homeScale);
@@ -276,33 +233,15 @@ export class Diver {
 
   step(dt: number): void {
     if (!this.mesh) return;
-    this.t += dt * (1 + this.danger * 1.6);
+    this.t += dt * (1 + this.danger * DANGER_TIME_SCALE);
     this.stepAnim();
     if (this.descent) return; // 탈출 중에는 경로가 위치를 쥔다
 
-    const amp = 1 + this.danger * DANGER_AMP_GAIN;
-    let bob: number;
-    if (this.grounded) {
-      // 접지 중엔 발이 접지선에 고정이라(place() 참고) 아래로 내려가는 흔들림은
-      // 타일을 파고든다 — 그래서 원래의 대칭 사인 둘을, 최댓값(BOB_COEFF*amp)만큼
-      // 미리 밀어 올려 [0, 2*BOB_COEFF*amp] 범위(항상 0 이상)로 바꾼다. 사인 둘을
-      // 그대로 겹친 채 밀기만 하므로 규칙적인 시계추가 아니라 여전히 "물살에
-      // 밀렸다 접지선으로 가라앉는" 흐름으로 읽힌다 — 접지선에 닿는 순간(골)에는
-      // 정확히 0, 물살이 세지는 순간(마루)에만 위로 뜬다.
-      const bobRaw = (Math.sin(this.t * 0.9) * 0.06 + Math.sin(this.t * 0.37) * 0.035) * amp;
-      const bobUp = bobRaw + BOB_COEFF * amp; // 항상 >= 0 (사인 둘의 절댓값 합이 BOB_COEFF 를 못 넘으므로)
-      bob = Math.min(this.maxBobWorld, bobUp);
-    } else {
-      const bobRaw = Math.sin(this.t * 0.9) * 0.06 + Math.sin(this.t * 0.37) * 0.035;
-      // 빈 띠가 좁으면(보드가 화면 대부분을 차지하는 레이아웃) 위급 시 흔들림 폭이
-      // 보드를 침범할 수 있다 -- place() 가 잡아둔 상한으로 누른다.
-      bob = Math.max(-this.maxBobWorld, Math.min(this.maxBobWorld, bobRaw * amp));
-    }
-    const tilt = Math.sin(this.t * 0.6) * 0.09 + Math.sin(this.t * 0.23) * 0.05;
-    this.mesh.position.set(this.home.x, this.home.y + bob, this.home.z);
-    // 요(y 축 회전)는 세로축을 그대로 두므로 보드 침범과 무관하다 — amp 를 곱해
-    // "위급하면 속도·폭만 커진다" 는 규칙만 맞춘다.
-    this.mesh.rotation.set(0, Math.sin(this.t * 0.21) * 0.25 * amp, tilt * amp);
+    // 대기 중: 완전히 정지한다 — 흔들림·기울기·요 전부 없앤다(사용자 요청). 발은
+    // place() 가 심어 둔 home 그대로, 몸은 정면(카메라 쪽)을 본다. diver.glb 에
+    // 구운 Idle 스켈레탈 애니메이션(stepAnim())만 살아있는 느낌을 준다.
+    this.mesh.position.copy(this.home);
+    this.mesh.rotation.set(0, 0, 0);
   }
 
   /**
