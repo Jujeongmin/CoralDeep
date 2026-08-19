@@ -8,6 +8,12 @@
 // extras 필드 이름은 diverAnim 이 아니라 bakedAnim 이다 — 잠수부 전용이 아니라 이
 // 포맷을 쓰는 모두(잠수부·아귀·고블린상어)의 공용 필드이기 때문이다. glb.ts 쪽도
 // 같은 이름으로 읽는다.
+//
+// 클립이 둘 이상(잠수부의 Idle·Walk)이면 anim 대신 anims(배열, 각 원소가 name 을
+// 갖는다)를 넘긴다 — extras.bakedAnims(복수)로 쓰고, 클립마다 델타 bufferView 를
+// 하나씩 더 붙인다. anim(단수)과 anims(복수)는 배타적이다 — 기존 호출부
+// (bake-predators-glb.mjs, 그리고 이 도구의 잠수부 Idle-only 시절)는 anim 만
+// 넘기므로 그 출력은 바이트 단위로 그대로다.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -18,25 +24,28 @@ const pad4 = (n) => (n + 3) & ~3;
  * @param outPath 쓸 경로
  * @param position/normal/color Float32Array (정점 수 * 3)
  * @param index Uint32Array
- * @param anim null 이면 애니메이션 없음. 있으면
- *   { frameCount, scale:[sx,sy,sz], deltaInt16, loopSeconds? }.
+ * @param anim null 이면(그리고 anims 도 없으면) 애니메이션 없음. 있으면
+ *   { frameCount, scale:[sx,sy,sz], deltaInt16, loopSeconds? } — 클립 하나만 굽는
+ *   기존 호출부(아귀·고블린상어, 그리고 예전 잠수부)가 쓴다.
  *   loopSeconds 는 선택 — 원본 클립이 자연스러운 루프 길이(초)를 알려줄 때만 채운다
- *   (예: 물고기의 Swimming_Normal). 잠수부처럼 일부러 원본보다 훨씬 느리게 트는
- *   경우는 호출부(diver.ts)가 자기만의 상수를 쓰므로 안 채워도 된다.
- * @returns anim 이 있으면 그 델타 바이트 수(로그용), 없으면 0.
+ *   (예: 물고기의 Swimming_Normal). 잠수부 Idle 처럼 일부러 원본보다 훨씬 느리게
+ *   트는 경우는 호출부(diver.ts)가 자기만의 상수를 쓰므로 안 채워도 된다.
+ * @param anims 클립이 둘 이상이면 anim 대신 이걸 넘긴다 — 각 원소가
+ *   { name, frameCount, scale, deltaInt16, loopSeconds? } (잠수부의 Idle·Walk).
+ *   모든 클립이 같은 POSITION(프레임 0, 공유 기준 자세)을 기준으로 델타를 잰다.
+ * @returns 델타 바이트 수 합(로그용). 애니메이션이 없으면 0.
  */
-export function writeGlb(outPath, { position, normal, color, index, anim }) {
+export function writeGlb(outPath, { position, normal, color, index, anim, anims }) {
+  const clips = anims ?? (anim ? [anim] : []);
+
   const parts = [
     Buffer.from(position.buffer, position.byteOffset, position.byteLength),
     Buffer.from(normal.buffer, normal.byteOffset, normal.byteLength),
     Buffer.from(color.buffer, color.byteOffset, color.byteLength),
     Buffer.from(index.buffer, index.byteOffset, index.byteLength),
   ];
-  let deltaBuf = null;
-  if (anim) {
-    deltaBuf = Buffer.from(anim.deltaInt16.buffer, anim.deltaInt16.byteOffset, anim.deltaInt16.byteLength);
-    parts.push(deltaBuf);
-  }
+  const deltaBufs = clips.map((c) => Buffer.from(c.deltaInt16.buffer, c.deltaInt16.byteOffset, c.deltaInt16.byteLength));
+  parts.push(...deltaBufs);
   const bin = Buffer.concat(parts);
 
   const offs = {
@@ -44,8 +53,8 @@ export function writeGlb(outPath, { position, normal, color, index, anim }) {
     nrm: position.byteLength,
     col: position.byteLength + normal.byteLength,
     idx: position.byteLength + normal.byteLength + color.byteLength,
-    anim: position.byteLength + normal.byteLength + color.byteLength + index.byteLength,
   };
+  const animBase = position.byteLength + normal.byteLength + color.byteLength + index.byteLength;
 
   const bufferViews = [
     { buffer: 0, byteOffset: offs.pos, byteLength: position.byteLength, target: 34962 },
@@ -53,7 +62,14 @@ export function writeGlb(outPath, { position, normal, color, index, anim }) {
     { buffer: 0, byteOffset: offs.col, byteLength: color.byteLength, target: 34962 },
     { buffer: 0, byteOffset: offs.idx, byteLength: index.byteLength, target: 34963 },
   ];
-  if (anim) bufferViews.push({ buffer: 0, byteOffset: offs.anim, byteLength: deltaBuf.length });
+  // 클립마다 bufferView 를 하나씩 더 붙인다 -- 첫 클립은 인덱스 4, 다음은 5 ...
+  let runningOffset = animBase;
+  const clipBufferViewIndices = [];
+  deltaBufs.forEach((buf) => {
+    clipBufferViewIndices.push(bufferViews.length);
+    bufferViews.push({ buffer: 0, byteOffset: runningOffset, byteLength: buf.length });
+    runningOffset += buf.length;
+  });
 
   const json = {
     asset: { version: '2.0', generator: 'coral-deep bake' },
@@ -70,19 +86,21 @@ export function writeGlb(outPath, { position, normal, color, index, anim }) {
       { bufferView: 3, componentType: 5125, count: index.length, type: 'SCALAR' },
     ],
   };
-  if (anim) {
+  // 프레임 0 은 POSITION(accessor 0) 그대로다. 프레임 1..frameCount-1 은 POSITION
+  // 대비 델타를 축마다 대칭 스케일로 양자화한 Int16 다: delta[axis] = int16 * scale[axis]
+  // deltasBufferView 안 레이아웃은 [frame][vertex][xyz] — glb.ts 참고.
+  const clipJson = (c, bvIndex) => ({
+    frameCount: c.frameCount,
+    scale: c.scale,
+    deltasBufferView: bvIndex,
+    ...(c.loopSeconds !== undefined ? { loopSeconds: c.loopSeconds } : {}),
+  });
+  if (anims) {
     json.extras = {
-      bakedAnim: {
-        // 프레임 0 은 POSITION(accessor 0) 그대로다. 프레임 1..frameCount-1 은
-        // POSITION 대비 델타를 축마다 대칭 스케일로 양자화한 Int16 다:
-        //   delta[axis] = int16 * scale[axis]
-        // deltasBufferView 안 레이아웃은 [frame][vertex][xyz] — glb.ts 참고.
-        frameCount: anim.frameCount,
-        scale: anim.scale,
-        deltasBufferView: 4,
-        ...(anim.loopSeconds !== undefined ? { loopSeconds: anim.loopSeconds } : {}),
-      },
+      bakedAnims: anims.map((c, i) => ({ name: c.name, ...clipJson(c, clipBufferViewIndices[i]) })),
     };
+  } else if (anim) {
+    json.extras = { bakedAnim: clipJson(anim, clipBufferViewIndices[0]) };
   }
 
   const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8');
@@ -101,5 +119,5 @@ export function writeGlb(outPath, { position, normal, color, index, anim }) {
   binHead.writeUInt32LE(0x004e4942, 4); // 'BIN'
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, Buffer.concat([head, jsonHead, jsonBuf, jsonPad, binHead, bin, binPad]));
-  return deltaBuf ? deltaBuf.length : 0;
+  return deltaBufs.reduce((sum, b) => sum + b.length, 0);
 }

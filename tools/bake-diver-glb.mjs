@@ -101,27 +101,41 @@ function buildVertexColors(mesh, palette) {
 
 // ---- 재생할 애니메이션 클립 ----
 //
-// Animations.fbx 에는 Idle 계열이 6개 있다: Idle, Idle_Gun, Idle_Gun_Pointing,
-// Idle_Gun_Shoot, Idle_Neutral, Idle_Sword. 잠수부는 총도 칼도 안 드므로 후보는
-// Idle 과 Idle_Neutral 둘로 좁혀진다. 8프레임 샘플로 정점 움직임 범위를 재보면
-// Idle 이 0.0335, Idle_Neutral 이 0.0159(정규화된 모델 좌표 기준, 전신 높이가 1) -
-// 거의 절반이다. 이 게임은 런타임에서 루프를 몇 배 느리게 늘려 재생하므로(diver.ts
-// 의 IDLE_ANIM_LOOP_SECONDS), 원본 움직임이 작을수록 늘렸을 때 거의 안 보이게
-// 잦아든다. 부유감을 살리려면 원본이 더 큰 쪽이 유리해 Idle 을 골랐다. 두 클립
-// 다 팔은 이미 T포즈가 아니라 몸통 옆으로 내려와 있다(원본 클립 자체가 그렇게
-// 애니메이션되어 있다) - 예전 poseArms() 같은 수동 회전은 더는 필요 없다.
-const ANIM_CLIP = 'CharacterArmature|Idle';
+// 잠수부는 이제 클립을 둘 굽는다 - 제자리에 설 때 트는 Idle, 탈출 중 트는 Walk.
+//
+// Idle: Animations.fbx 에는 Idle 계열이 6개 있다: Idle, Idle_Gun,
+// Idle_Gun_Pointing, Idle_Gun_Shoot, Idle_Neutral, Idle_Sword. 잠수부는 총도
+// 칼도 안 드므로 후보는 Idle 과 Idle_Neutral 둘로 좁혀진다. 8프레임 샘플로 정점
+// 움직임 범위를 재보면 Idle 이 0.0335, Idle_Neutral 이 0.0159(정규화된 모델 좌표
+// 기준, 전신 높이가 1) - 거의 절반이다. 이 게임은 런타임에서 루프를 몇 배 느리게
+// 늘려 재생하므로(diver.ts 의 IDLE_ANIM_LOOP_SECONDS), 원본 움직임이 작을수록
+// 늘렸을 때 거의 안 보이게 잦아든다. 부유감을 살리려면 원본이 더 큰 쪽이 유리해
+// Idle 을 골랐다.
+//
+// Walk: 탈출(보드를 가로질러 빠져나가는) 중에만 튼다. 후보는 Walk 하나뿐이다
+// (Run/Run_Back 은 탈출 속도에 비해 너무 격하다 - 탈출은 130ms/칸 정도로 걷는
+// 속도에 가깝다).
+//
+// 두 클립 다 팔은 이미 T포즈가 아니라 몸통 옆으로 내려와 있다(원본 클립 자체가
+// 그렇게 애니메이션되어 있다) - 예전 poseArms() 같은 수동 회전은 더는 필요 없다.
+const IDLE_CLIP_NAME = 'CharacterArmature|Idle';
+const WALK_CLIP_NAME = 'CharacterArmature|Walk';
 
 // 루프 한 바퀴를 몇 프레임으로 구울까.
 //
-// 정점 5470개 * 3축 * 2바이트(Int16 델타) = 프레임당 32820바이트. 예산은
-// "추가되는 애니메이션 데이터 400KB 이하". 프레임 0 은 POSITION 자체이므로 델타를
-// 저장할 필요가 없다 - 실제로 굽는 델타는 FRAME_COUNT-1 개.
-//   11 * 32820 ≈ 351.6KB  (FRAME_COUNT=12, 이 값)
-//   12 * 32820 ≈ 384.6KB  (FRAME_COUNT=13, 여유가 빠듯하다)
-// Idle 클립 자체가 50프레임(30fps, 1.667초)이고 움직임이 느린 호흡·흔들림
-// 수준이라 12프레임 샘플로도 원본 곡선과 시각적으로 거의 구분이 안 된다.
-const FRAME_COUNT = 12;
+// 정점 5470개 * 3축 * 2바이트(Int16 델타) = 프레임당 32820바이트(클립·진폭과
+// 무관하다 - Int16 양자화는 항상 축당 2바이트이므로 움직임이 커도 프레임당 바이트
+// 수는 그대로다). 예산은 "diver.glb 전체 1.1MB 이하"(요청 기준) - 고정 메시
+// 데이터(POSITION/NORMAL/COLOR_0/인덱스)가 이미 약 316KB 다.
+//   Idle: 11 델타 프레임 * 32820 ≈ 351.6KB (FRAME_COUNT=12)
+//   Walk: 11 델타 프레임 * 32820 ≈ 351.6KB (FRAME_COUNT=12)
+//   316 + 351.6 + 351.6 ≈ 1019KB(JSON 헤더 포함 약 1020KB) - 1.1MB 예산 안에
+//   넉넉히 들어온다(여유 약 80KB). Walk 는 다리를 크게 휘젓는 동작이라 Idle 과
+//   같은 프레임 수라도 원본 곡선을 덜 정확히 따라가지만(모서리가 둥글어지는
+//   정도), 다리가 완전히 새 위치로 "순간이동"하는 수준은 아니다 - 실측치는 바로
+//   아래(maxSilhouetteRange 로그, per-frame max step 로그)에서 찍는다.
+const IDLE_FRAME_COUNT = 12;
+const WALK_FRAME_COUNT = 12;
 
 const PART_NAMES = ['Head', 'Body', 'Legs', 'Feet'];
 
@@ -140,17 +154,25 @@ const parts = PART_NAMES.map((name) => {
 
 const animNodes = parseFbx(readFileSync(resolve(SRC, 'Animations.fbx')));
 const animHierarchy = parseModelHierarchy(animNodes);
-const clip = parseAnimationClip(animNodes, ANIM_CLIP);
+// 두 클립 다 같은 스켈레톤(animHierarchy)을 쓴다 - 클립마다 본 트랙만 다르다.
+const idleClip = parseAnimationClip(animNodes, IDLE_CLIP_NAME);
+const walkClip = parseAnimationClip(animNodes, WALK_CLIP_NAME);
 
 /** 모델 좌표 -> Y-up, +Z 정면 */
 const mapVert = (v, i) => [v[i], v[i + 2], -v[i + 1]];
 
 /**
- * 시각 t(초) 에서 네 부위를 전부 스킨해 Head, Body, Legs, Feet 순서로 이어붙인,
- * 아직 정규화 전인 위치 배열을 만든다. 순서는 buildColorAndIndex() 의 순서와
- * 반드시 같아야 정점 인덱스가 어긋나지 않는다.
+ * clip 의 시각 t(초) 에서 네 부위를 전부 스킨해 Head, Body, Legs, Feet 순서로
+ * 이어붙인, 아직 정규화 전인 위치 배열을 만든다. 순서는 buildColorAndIndex() 의
+ * 순서와 반드시 같아야 정점 인덱스가 어긋나지 않는다.
+ *
+ * clip 을 인자로 받는다 - Idle·Walk 둘 다 같은 함수로 샘플링하되(스키닝 자체는
+ * 클립과 무관), 프레임 0(기준 자세)은 반드시 Idle 의 t=0 으로 한 번만 잡는다(아래
+ * 굽기 절 참고) - Walk 델타도 그 기준 자세 대비로 재야 두 클립이 같은 POSITION
+ * accessor 를 공유할 수 있다(glb.ts/glbWrite.mjs 의 "프레임 0 은 공유 기준 자세"
+ * 전제).
  */
-function mergedPositionAt(t) {
+function mergedPositionAt(clip, t) {
   const boneGlobals = computeGlobalTransforms(animHierarchy, clip, t);
   const position = [];
   for (const part of parts) {
@@ -219,49 +241,92 @@ function applyNormalize(position, params) {
 
 const { color, index } = buildColorAndIndex();
 
-const frame0Raw = mergedPositionAt(0);
+// 기준 자세(프레임 0)는 Idle 의 t=0 딱 한 번만 잡는다 - Walk 델타도 이 자세
+// 대비로 재야 두 클립이 같은 POSITION accessor(공유 기준 자세)를 쓸 수 있다.
+const frame0Raw = mergedPositionAt(idleClip, 0);
 const normParams = computeNormalizeParams(frame0Raw);
 applyNormalize(frame0Raw, normParams);
 const position = frame0Raw;
 const normal = computeFlatNormals(position, index);
-
 const vertCount = position.length / 3;
-const deltaFrames = [];
-for (let i = 1; i < FRAME_COUNT; i++) {
-  const t = (clip.durationSeconds * i) / FRAME_COUNT;
-  const raw = mergedPositionAt(t);
-  applyNormalize(raw, normParams);
-  const delta = new Float32Array(raw.length);
-  for (let k = 0; k < raw.length; k++) delta[k] = raw[k] - position[k];
-  deltaFrames.push(delta);
-}
 
-const { scale, deltaInt16 } = quantizeDeltaFrames(deltaFrames, vertCount);
+/** 발 정점 - frame0 y(발~정수리 정규화, 발이 0) 가 작은 정점들. 검증용. */
+const footVertexIndices = [];
+for (let vi = 0; vi < vertCount; vi++) if (position[vi * 3 + 1] < 0.03) footVertexIndices.push(vi);
 
-// 실루엣이 프레임 사이에서 얼마나 움직이는지(정규화 모델 좌표, 전신 높이가 1) -
-// 검증할 때 화면 px 로 환산하는 데 쓴다.
-let maxRangeSq = 0;
-for (let vi = 0; vi < vertCount; vi++) {
-  let mn = [position[vi * 3], position[vi * 3 + 1], position[vi * 3 + 2]];
-  let mx = [...mn];
-  for (const delta of deltaFrames) {
-    for (let a = 0; a < 3; a++) {
-      const v = position[vi * 3 + a] + delta[vi * 3 + a];
-      mn[a] = Math.min(mn[a], v);
-      mx[a] = Math.max(mx[a], v);
-    }
+/**
+ * clip 을 FRAME_COUNT 개로 균등 샘플링해 프레임 0(기준 자세) 대비 델타 프레임
+ * 목록을 만들고, 검증용 통계(실루엣 전체 범위·프레임 간 최대 이동·발 정점 전체
+ * 범위)까지 함께 잰다.
+ */
+function bakeClip(clip, frameCount) {
+  const deltaFrames = [];
+  for (let i = 1; i < frameCount; i++) {
+    const t = (clip.durationSeconds * i) / frameCount;
+    const raw = mergedPositionAt(clip, t);
+    applyNormalize(raw, normParams);
+    const delta = new Float32Array(raw.length);
+    for (let k = 0; k < raw.length; k++) delta[k] = raw[k] - position[k];
+    deltaFrames.push(delta);
   }
-  const dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
-  maxRangeSq = Math.max(maxRangeSq, dx * dx + dy * dy + dz * dz);
+  const { scale, deltaInt16 } = quantizeDeltaFrames(deltaFrames, vertCount);
+
+  // 실루엣이 루프 전체에서 얼마나 움직이는지(정규화 모델 좌표, 전신 높이가 1) -
+  // 검증할 때 화면 px 로 환산하는 데 쓴다.
+  let maxRangeSq = 0;
+  let maxFootRangeSq = 0;
+  let maxStepSq = 0; // 인접한 두 구운 프레임 사이 최대 이동(끊겨 보이는지 가늠)
+  for (let vi = 0; vi < vertCount; vi++) {
+    const mn = [position[vi * 3], position[vi * 3 + 1], position[vi * 3 + 2]];
+    const mx = [...mn];
+    let prev = mn;
+    for (const delta of deltaFrames) {
+      const v = [position[vi * 3] + delta[vi * 3], position[vi * 3 + 1] + delta[vi * 3 + 1], position[vi * 3 + 2] + delta[vi * 3 + 2]];
+      for (let a = 0; a < 3; a++) {
+        mn[a] = Math.min(mn[a], v[a]);
+        mx[a] = Math.max(mx[a], v[a]);
+      }
+      const sx = v[0] - prev[0], sy = v[1] - prev[1], sz = v[2] - prev[2];
+      maxStepSq = Math.max(maxStepSq, sx * sx + sy * sy + sz * sz);
+      prev = v;
+    }
+    const dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
+    const rangeSq = dx * dx + dy * dy + dz * dz;
+    maxRangeSq = Math.max(maxRangeSq, rangeSq);
+    if (footVertexIndices.includes(vi)) maxFootRangeSq = Math.max(maxFootRangeSq, rangeSq);
+  }
+  return {
+    frameCount,
+    scale,
+    deltaInt16,
+    durationSeconds: clip.durationSeconds,
+    maxSilhouetteRange: Math.sqrt(maxRangeSq),
+    maxFootRange: Math.sqrt(maxFootRangeSq),
+    maxStep: Math.sqrt(maxStepSq),
+  };
 }
-const maxSilhouetteRange = Math.sqrt(maxRangeSq);
+
+const idleBake = bakeClip(idleClip, IDLE_FRAME_COUNT);
+const walkBake = bakeClip(walkClip, WALK_FRAME_COUNT);
 
 const animBytes = writeGlb(OUT, {
   position,
   normal,
   color,
   index,
-  anim: { frameCount: FRAME_COUNT, scale, deltaInt16 },
+  anims: [
+    { name: 'Idle', frameCount: idleBake.frameCount, scale: idleBake.scale, deltaInt16: idleBake.deltaInt16 },
+    {
+      name: 'Walk',
+      frameCount: walkBake.frameCount,
+      scale: walkBake.scale,
+      deltaInt16: walkBake.deltaInt16,
+      // Walk 는 Idle 과 달리 원본 속도 그대로 튼다(diver.ts 참고) - 그러려면
+      // 호출부가 원본 루프 길이를 알아야 한다(predators.ts 의 Swimming_Normal 과
+      // 같은 패턴 - glbWrite.mjs 주석 참고).
+      loopSeconds: walkBake.durationSeconds,
+    },
+  ],
 });
 
 console.log(`diver.glb  정점 ${position.length / 3}  삼각형 ${index.length / 3}`);
@@ -286,11 +351,23 @@ for (const part of parts) {
   console.log(`  ${part.name}  재질 ${part.palette.length}개: ${paletteStr}`);
   console.log(`  ${part.name}  정점 평균 색(sRGB 0..255, 경계 정점 섞임 포함): rgb(${avg255.join(',')})`);
 }
-console.log(
-  `애니메이션  clip=${ANIM_CLIP}  프레임 ${FRAME_COUNT}(루프 ${clip.durationSeconds.toFixed(3)}s 를 균등 샘플)` +
-    `  델타 ${(animBytes / 1024).toFixed(1)}KB  축스케일 ${scale.map((s) => s.toExponential(3)).join(', ')}`,
-);
-console.log(
-  `가장 많이 움직이는 정점의 프레임 간 최대 이동 범위(정규화 모델 좌표, 전신 높이=1): ${maxSilhouetteRange.toFixed(4)}` +
-    ` (전신 높이 82px 기준 약 ${(maxSilhouetteRange * 82).toFixed(1)}px)`,
-);
+const clipNames = { idle: IDLE_CLIP_NAME, walk: WALK_CLIP_NAME };
+for (const [key, bake] of [['idle', idleBake], ['walk', walkBake]]) {
+  const deltaBytes = (bake.frameCount - 1) * vertCount * 3 * 2;
+  console.log(
+    `애니메이션  clip=${clipNames[key]}  프레임 ${bake.frameCount}(루프 ${bake.durationSeconds.toFixed(3)}s 를 균등 샘플)` +
+      `  델타 ${(deltaBytes / 1024).toFixed(1)}KB  축스케일 ${bake.scale.map((s) => s.toExponential(3)).join(', ')}`,
+  );
+  console.log(
+    `  가장 많이 움직이는 정점의 루프 전체 최대 이동 범위(정규화 모델 좌표, 전신 높이=1): ${bake.maxSilhouetteRange.toFixed(4)}` +
+      ` (전신 높이 82px 기준 약 ${(bake.maxSilhouetteRange * 82).toFixed(1)}px)`,
+  );
+  console.log(
+    `  발 정점(frame0 y<0.03) 루프 전체 최대 이동 범위: ${bake.maxFootRange.toFixed(4)}` +
+      ` (전신 높이 82px 기준 약 ${(bake.maxFootRange * 82).toFixed(1)}px)`,
+  );
+  console.log(
+    `  인접 구운 프레임 사이 최대 이동(전신 높이 82px 기준, 끊김 정도 가늠): ${(bake.maxStep * 82).toFixed(2)}px`,
+  );
+}
+console.log(`diver.glb 총 크기 ${(animBytes / 1024).toFixed(1)}KB(애니메이션 델타 합) — 파일 전체 크기는 별도로 ls 로 확인`);

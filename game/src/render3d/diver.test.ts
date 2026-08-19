@@ -8,7 +8,8 @@
 //  2) 접지 위치에 더 이상 안전 여유(reachPx)가 없다는 것 — place() 는 이제
 //     anchor 를 그대로 심는다.
 //  3) 실제로 구운 diver.glb 를 읽어, 대기 중 유일하게 남은 움직임(Idle 스켈레탈
-//     정점 애니메이션)이 발을 얼마나 움직이는지 데이터로 확인한다.
+//     정점 애니메이션)이 발을 얼마나 움직이는지, 그리고 탈출용 Walk 클립이 실제로
+//     걷는 동작인지(발이 유의미하게 움직이는지)를 데이터로 확인한다.
 //
 // diver.ts 는 Diver 클래스가 constructor(private scene: THREE.Scene) 같은 TS
 // parameter property 를 써서 npm test 의 Node 내장 strip-only 로더로 못 읽는다
@@ -17,7 +18,7 @@
 // 실제 구운 파일을 그대로 읽어 검증하는 3번 테스트가 가능한 이유다.
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { unpackAnimFrames } from './bakedAnim.ts';
@@ -76,7 +77,7 @@ test('place(): 접지선에 심은 자리를 다시 화면으로 투영하면 �
   const view = planeView(screenW, screenH, FOV, CAM_Z);
   const anchor = { x: 173.4, y: 210.8 };
 
-  // diver.ts place() 가 실제로 하는 계산 그대로.
+  // diver.ts place() 의 grounded 경로가 실제로 하는 계산 그대로.
   const k = depthScale(CAM_Z, HOME_Z);
   const p = screenToPlane(anchor.x, anchor.y, screenW, screenH, view);
   const home = { x: p.x * k, y: p.y * k };
@@ -89,7 +90,7 @@ test('place(): 접지선에 심은 자리를 다시 화면으로 투영하면 �
   assert.ok(Math.abs(backY - anchor.y) < 1e-9);
 });
 
-// ---- 3) 실제로 구운 diver.glb 를 읽어 대기 중 유일한 움직임을 확인한다 ----
+// ---- 3) 실제로 구운 diver.glb 를 읽어 검증한다 ----
 
 const glbUrl = new URL('../assets/sprites3d/diver.glb', import.meta.url);
 const glbBuf = readFileSync(glbUrl);
@@ -100,9 +101,15 @@ const mesh = parseGlb(glbBuf.buffer.slice(glbBuf.byteOffset, glbBuf.byteOffset +
  * 로그가 쓰는 것과 같은 기준값(전형적인 칸 크기 기준 실측)이다. */
 const TYPICAL_HEIGHT_PX = 82;
 
+test('diver.glb 는 Idle·Walk 두 클립을 모두 담고 있다', () => {
+  assert.ok(mesh.anims, 'mesh.anims 가 없다 -- bakedAnims(복수) 가 안 구워졌다');
+  const names = mesh.anims!.map((a) => a.name).sort();
+  assert.deepEqual(names, ['Idle', 'Walk']);
+});
+
 test('Idle 클립: 발 정점(frame0 y<0.03)이 루프 전체에서 사실상 안 움직인다(1px 미만)', () => {
-  assert.ok(mesh.anim, 'mesh.anim 이 없다 -- Idle 클립이 안 구워졌다');
-  const frames = unpackAnimFrames(mesh.position, mesh.anim!);
+  const idle = mesh.anims!.find((a) => a.name === 'Idle')!;
+  const frames = unpackAnimFrames(mesh.position, idle);
   const vertexCount = mesh.position.length / 3;
 
   const footVerts: number[] = [];
@@ -124,4 +131,42 @@ test('Idle 클립: 발 정점(frame0 y<0.03)이 루프 전체에서 사실상 �
   }
   const maxRangePx = Math.sqrt(maxRangeSq) * TYPICAL_HEIGHT_PX;
   assert.ok(maxRangePx < 1, `발 정점이 ${maxRangePx.toFixed(3)}px 나 움직인다 -- 대기 중 정지 전제가 깨졌다`);
+});
+
+test('Walk 클립: 원본 루프 길이(약 1.33초)를 그대로 들고 있다', () => {
+  const walk = mesh.anims!.find((a) => a.name === 'Walk')!;
+  assert.ok(walk.loopSeconds !== undefined, 'Walk 클립에 loopSeconds 가 없다 -- diver.ts 가 원본 속도로 못 튼다');
+  assert.ok(Math.abs(walk.loopSeconds! - 1.3333) < 0.01, `loopSeconds=${walk.loopSeconds} 가 예상(1.333s)과 다르다`);
+});
+
+test('Walk 클립: 발이 실제로 걷는 만큼(눈에 띄게) 움직인다', () => {
+  const walk = mesh.anims!.find((a) => a.name === 'Walk')!;
+  const frames = unpackAnimFrames(mesh.position, walk);
+  const vertexCount = mesh.position.length / 3;
+
+  const footVerts: number[] = [];
+  for (let vi = 0; vi < vertexCount; vi++) if (mesh.position[vi * 3 + 1] < 0.03) footVerts.push(vi);
+
+  let maxRangeSq = 0;
+  for (const vi of footVerts) {
+    const mn = [Infinity, Infinity, Infinity];
+    const mx = [-Infinity, -Infinity, -Infinity];
+    for (const f of frames) {
+      for (let a = 0; a < 3; a++) {
+        mn[a] = Math.min(mn[a], f[vi * 3 + a]);
+        mx[a] = Math.max(mx[a], f[vi * 3 + a]);
+      }
+    }
+    const dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
+    maxRangeSq = Math.max(maxRangeSq, dx * dx + dy * dy + dz * dz);
+  }
+  const maxRangePx = Math.sqrt(maxRangeSq) * TYPICAL_HEIGHT_PX;
+  // Idle 의 발 움직임(<1px)과 뚜렷이 대비되는 하한 -- "정말 걷는 것처럼 보이는가"의
+  // 최소선으로 10px 를 잡는다(실측은 약 44.6px, 아래 기준 대비 넉넉한 여유가 있다).
+  assert.ok(maxRangePx > 10, `발이 겨우 ${maxRangePx.toFixed(1)}px 밖에 안 움직인다 -- Walk 라기엔 너무 정적이다`);
+});
+
+test('diver.glb 파일 전체 크기가 1.1MB 예산 안에 있다', () => {
+  const bytes = statSync(glbUrl).size;
+  assert.ok(bytes <= 1_100_000, `diver.glb 가 ${(bytes / 1024).toFixed(1)}KB 로 1.1MB 예산을 넘었다`);
 });
