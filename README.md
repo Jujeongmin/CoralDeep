@@ -385,6 +385,36 @@ PNG 한 장과 `diver.json`(기준점 · 전신 높이)을 낸다.
 몸통을 더 어둡게 두면 640m 물빛에 실루엣이 잠긴다. 중간 톤을 유지하고 대비는 헬멧이
 만들게 했다.
 
+### 포식자 3D 모델 (`tools/bake-predators-glb.mjs` → `sprites3d/*.glb`)
+
+3D 장면(`render3d/predators.ts`)의 포식자 셋도 손으로 만든 저폴리 도형이 아니라 실제
+심해생물 모델이다. **Quaternius 의 저폴리 물고기(CC0, glTF)** 를 poly.pizza 에서 받아 굽는다.
+원본은 `assets-raw/poly-pizza/`(라이선스는 그 폴더의 `License.txt`)에 있고, 굽는 도구가
+`game/src/assets/sprites3d/{anglerfish,goblinShark,squid}.glb` 를 낸다.
+
+| 역할 | 생물 |
+| --- | --- |
+| (예전 곰치) | **아귀(Anglerfish)** |
+| (예전 아귀) | **고블린상어(Goblin Shark)** |
+| (예전 촉수) | **대왕오징어(Squid)** |
+
+원본 glTF 는 색을 정점이 아니라 **재질**(`baseColorFactor`, 오징어만 텍스처 아틀라스)로
+칠한다. `glb.ts`(런타임 파서)는 정점 색만 읽으므로 굽는 시점에 눌러 담는다: 재질만
+있는 프리미티브는 `baseColorFactor`(linear 색공간)를 sRGB 로 변환해 그 프리미티브의
+모든 정점에 칠하고, 오징어는 유일한 색 소스가 512×512 텍스처(`Sushi_Atlas.png`, 여러
+모델이 공유하는 아틀라스로 보인다)라 UV 로 쌍선형 샘플링해 정점마다 다르게 칠한다 —
+런타임 이미지 자산은 여전히 0개다.
+
+아귀·고블린상어는 스킨 애니메이션 6개(Attack/Death/Out_Of_Water/Swimming_Fast/
+Swimming_Impulse/Swimming_Normal)를 갖고 있다. 그중 가장 길고 매끄러운 루프인
+**Swimming_Normal**(56키프레임, 2.292초)을 골라, 잠수부(`bake-diver-glb.mjs`)와 같은
+방식으로 스키닝을 오프라인에서 CPU 로 미리 계산해 정점 위치 몇 프레임을 구워 넣는다
+— 런타임은 여전히 스키닝을 하지 않고 두 프레임 사이를 보간만 한다. 오징어는 스킨도
+애니메이션도 없어 정지 메시만 굽고, 장면에서는 흔들림·회전으로 생기를 준다.
+
+세 파일 합쳐 400KB 예산 안(실측 ~375KB)에서 굽는다 — 자세한 예산 계산은
+`tools/bake-predators-glb.mjs` 상단 주석 참고.
+
 ## 아이콘 에셋
 
 이모지를 쓰지 않는다. `tools/make-icons.mjs` 가 27개 SVG를 `game/src/assets/icons/` 에 생성하고,

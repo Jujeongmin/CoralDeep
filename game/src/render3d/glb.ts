@@ -39,6 +39,12 @@ export interface GlbAnim {
    * (frameCount - 1) * vertexCount * 3.
    */
   deltas: Int16Array;
+  /**
+   * 원본 클립의 자연스러운 루프 길이(초) — 있으면 굽는 도구가 알려준 값이다
+   * (물고기의 Swimming_Normal 처럼 "원래 이 속도로 도는 게 자연스럽다"인 클립).
+   * 없으면(잠수부처럼 호출부가 일부러 다른 속도로 트는 경우) 호출부가 자기 상수를 쓴다.
+   */
+  loopSeconds?: number;
 }
 
 export function parseGlb(buf: ArrayBuffer): GlbMesh {
@@ -72,6 +78,7 @@ export function parseGlb(buf: ArrayBuffer): GlbMesh {
       frameCount: bakedAnim.frameCount,
       scale: bakedAnim.scale,
       deltas: new Int16Array(buf.slice(off, off + deltaCount * 2)),
+      ...(bakedAnim.loopSeconds !== undefined ? { loopSeconds: bakedAnim.loopSeconds as number } : {}),
     };
   }
 

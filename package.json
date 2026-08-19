@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "node --test game/src/core/core.test.ts game/src/render3d/projection.test.ts game/src/render3d/depthProjection.test.ts game/src/render3d/pxToNdc.test.ts game/src/render3d/diver.test.ts game/src/render3d/predators.test.ts game/src/render3d/index.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "bake:diver": "node tools/bake-diver-glb.mjs"
+    "bake:diver": "node tools/bake-diver-glb.mjs",
+    "bake:predators": "node tools/bake-predators-glb.mjs"
   },
   "dependencies": {
     "@verse8/ads": "^0.4.0",

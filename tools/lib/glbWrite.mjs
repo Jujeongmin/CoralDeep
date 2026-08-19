@@ -18,7 +18,11 @@ const pad4 = (n) => (n + 3) & ~3;
  * @param outPath 쓸 경로
  * @param position/normal/color Float32Array (정점 수 * 3)
  * @param index Uint32Array
- * @param anim null 이면 애니메이션 없음. 있으면 { frameCount, scale:[sx,sy,sz], deltaInt16 }.
+ * @param anim null 이면 애니메이션 없음. 있으면
+ *   { frameCount, scale:[sx,sy,sz], deltaInt16, loopSeconds? }.
+ *   loopSeconds 는 선택 — 원본 클립이 자연스러운 루프 길이(초)를 알려줄 때만 채운다
+ *   (예: 물고기의 Swimming_Normal). 잠수부처럼 일부러 원본보다 훨씬 느리게 트는
+ *   경우는 호출부(diver.ts)가 자기만의 상수를 쓰므로 안 채워도 된다.
  * @returns anim 이 있으면 그 델타 바이트 수(로그용), 없으면 0.
  */
 export function writeGlb(outPath, { position, normal, color, index, anim }) {
@@ -76,6 +80,7 @@ export function writeGlb(outPath, { position, normal, color, index, anim }) {
         frameCount: anim.frameCount,
         scale: anim.scale,
         deltasBufferView: 4,
+        ...(anim.loopSeconds !== undefined ? { loopSeconds: anim.loopSeconds } : {}),
       },
     };
   }
