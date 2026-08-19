@@ -17,14 +17,14 @@ import {
   addPearls,
   addStars,
   buyBooster,
+  buyHeartRefill,
   claimDaily,
   dailyAvailable,
-  fillHearts,
   grantWheel,
   markWheelFreeUsed,
+  openPiggyBank,
   piggyReady,
   refreshHearts,
-  spendPearls,
   wheelFreeAvailable,
   type WheelSlot,
 } from '../economy.ts';
@@ -105,11 +105,10 @@ export function openHeartsModal(refresh: Refresh): void {
         el('span', { class: 'buy-label', text: t('refillHearts') }),
         // 상점의 하트 상품과 **같은 가격**이어야 한다. 같은 물건이 두 가격이면 싼 쪽만 팔린다.
         priceButton(HEART_REFILL_PRICE, () => {
-          if (!spendPearls(HEART_REFILL_PRICE)) {
+          if (!buyHeartRefill(HEART_REFILL_PRICE)) {
             toast(t('notEnoughPearls'), 'warn');
             return;
           }
-          fillHearts();
           sfx.coin();
           done();
         }),
@@ -440,11 +439,7 @@ export function openPiggyModal(refresh: Refresh): void {
         }, { onDone: () => { refresh(); rebuild(); } }),
         piggyReady()
           ? button(t('piggyOpen'), () => {
-              const amount = getSave().piggy;
-              mutateSave((s) => {
-                s.piggy = 0;
-              });
-              addPearls(amount);
+              const amount = openPiggyBank();
               sfx.coin();
               toast(tf('rewardPearls', { n: amount }));
               refresh();
@@ -661,7 +656,7 @@ export function openPreBoostModal(
             adButton('free-booster-prelevel', t('freeBoosterAd'), () => {
               addBooster(entry.id, 1);
               toast(`${meta.name} +1`);
-            }, { class: 'btn-tiny', onDone: () => rebuild() }),
+            }, { class: 'btn-tiny', extra: entry.id, onDone: () => rebuild() }),
           );
         }
         list.append(card);
@@ -858,7 +853,7 @@ export function openFreeBoosterModal(
       adButton('free-booster-ingame', t('watchAd'), () => {
         addBooster(boosterId, 1);
         onGranted();
-      }, { class: 'btn-primary', onDone: (ok) => ok && close() }),
+      }, { class: 'btn-primary', extra: boosterId, onDone: (ok) => ok && close() }),
       button(t('cancel'), close, { class: 'btn-secondary' }),
     );
     return el('div', {}, modalHeader(meta.name, close), body);

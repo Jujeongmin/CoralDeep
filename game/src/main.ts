@@ -17,6 +17,7 @@ import { renderAquarium } from './screens/aquariumScreen.ts';
 import { renderLevel } from './screens/level.ts';
 import { refreshHearts } from './economy.ts';
 import { unlockAudio } from './audio.ts';
+import { initServerAccount, syncNow } from './net/serverAccount.ts';
 
 /**
  * Verse8 플랫폼이 iframe URL 에 넣어주는 ?auth= 토큰에서 계정을 꺼낸다.
@@ -54,6 +55,11 @@ async function boot(): Promise<void> {
   refreshHearts();
   unlockAudio();
 
+  // 계정 서버와의 첫 동기화(마이그레이션)는 배경에서 돈다 — 로컬은 이미 위에서
+  // loadSave() 로 준비됐으므로, 접속이 느리거나 서버가 없어도(배포 전, 오프라인)
+  // 첫 화면 진입을 막지 않는다. 서버 값이 오면 그때 로컬을 계정 값으로 맞춘다.
+  void initServerAccount();
+
   setHost(app);
   registerScreen('map', renderMap);
   registerScreen('aquarium', renderAquarium);
@@ -71,10 +77,17 @@ async function boot(): Promise<void> {
     };
   }
 
-  // 탭을 벗어날 때 확실히 저장
-  window.addEventListener('pagehide', () => void flushSave());
+  // 탭을 벗어날 때 확실히 저장. 계정 서버에도 같은 타이밍에 최선노력으로 밀어 둔다 —
+  // 그 사이 로컬에서만 소비된 것(부스터·하트 사용 등)이 계정에 반영될 마지막 기회다.
+  window.addEventListener('pagehide', () => {
+    void flushSave();
+    syncNow();
+  });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void flushSave();
+    if (document.visibilityState === 'hidden') {
+      void flushSave();
+      syncNow();
+    }
   });
 }
 

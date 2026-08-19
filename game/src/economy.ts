@@ -2,6 +2,13 @@
 
 import type { BoosterId, SaveData } from './storage.ts';
 import { dayKey, getSave, mutateSave } from './storage.ts';
+import {
+  buyBoosterRemote,
+  buyHeartRefillRemote,
+  claimDailyRemote,
+  openPiggyBankRemote,
+  reportLevelClearRemote,
+} from './net/serverAccount.ts';
 
 export const MAX_HEARTS = 5;
 export const HEART_REGEN_MS = 20 * 60 * 1000; // 20분에 1개
@@ -185,6 +192,9 @@ export function useBoosterItem(id: BoosterId): boolean {
 export function buyBooster(id: BoosterId): boolean {
   if (!spendPearls(BOOSTER_PRICE[id])) return false;
   addBooster(id, 1);
+  // 계정 서버에도 같은 구매를 알린다. 로컬은 이미 위에서 끝났으므로(오프라인 우선)
+  // 이 호출은 배경에서 최선노력으로 돈다 — 실패해도 이 기기의 플레이는 안 막힌다.
+  buyBoosterRemote(id);
   return true;
 }
 
@@ -218,6 +228,10 @@ export function claimDaily(now: number = Date.now()): { index: number; pearls: n
   addPearls(reward.pearls);
   if (reward.hearts) addHearts(reward.hearts, now);
   if (reward.booster) addBooster(reward.booster, 1);
+
+  // 계정 서버도 스트릭을 자기 시계(UTC)로 따로 센다 — 자정 부근에서 어느 칸을
+  // 받았는지가 살짝 어긋날 수 있다는 한계가 있다 (claimDailyRemote 주석 참고).
+  claimDailyRemote();
 
   return { index, pearls: reward.pearls };
 }
@@ -277,5 +291,34 @@ export function recordLevelClear(levelId: number, stars: number, save: SaveData 
     s.highestUnlocked = Math.max(s.highestUnlocked, levelId + 1);
     s.stars += gainedStars;
   });
+  // 보상 진주는 호출부(screens/level.ts)가 levelReward(levelId, stars) 로 따로 계산해
+  // addPearls 한다 — 계정 서버도 같은 공식으로 스스로 계산하므로(server.js 의
+  // reportLevelClear) 여기서는 levelId/stars 만 알리면 된다. 승패 자체(보드를 정말
+  // 깼는가)는 서버가 검증하지 않는다 — 매치3 시뮬레이션을 옮기지 않는 한 볼 방법이
+  // 없다는 한계를 그대로 안고 간다(server.js 머리말 참고).
+  reportLevelClearRemote(levelId, stars);
   return gainedStars;
+}
+
+// ---- 하트 풀 충전 (진주 결제) ----
+
+export function buyHeartRefill(price: number, now: number = Date.now()): boolean {
+  if (!spendPearls(price)) return false;
+  fillHearts(now);
+  buyHeartRefillRemote();
+  return true;
+}
+
+// ---- 저금통 ----
+
+/** 저금통을 비우고 쌓인 진주를 받는다. 덜 찼으면 아무 일도 안 하고 0을 돌려준다. */
+export function openPiggyBank(): number {
+  const amount = getSave().piggy;
+  if (amount < PIGGY_CAP) return 0;
+  mutateSave((s) => {
+    s.piggy = 0;
+  });
+  addPearls(amount);
+  openPiggyBankRemote();
+  return amount;
 }

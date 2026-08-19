@@ -6,6 +6,8 @@ import { formatDuration, t, tf } from './i18n.ts';
 import { sfx } from './audio.ts';
 import { haptics } from './haptics.ts';
 import { icon, type IconName } from './icons.ts';
+import { claimAdRewardIfOwned } from './net/serverAccount.ts';
+import type { BoosterId } from './storage.ts';
 
 type Child = Node | string | null | undefined | false;
 
@@ -275,10 +277,15 @@ export function adAvailability(placement: PlacementId): { ok: boolean; reason: s
 /**
  * 보상형 광고를 재생하고, 끝까지 본 경우에만 onReward 를 부른다.
  * 반드시 사용자 클릭 핸들러 안에서 호출할 것.
+ *
+ * @param extra 부스터를 고르는 지면(`free-booster-prelevel`/`free-booster-ingame`)에서
+ *   어느 부스터를 받는지. 계정 서버에 그대로 실어 보낸다(`claimAdRewardIfOwned`) —
+ *   그 외 지면에서는 안 쓴다.
  */
 export async function watchRewarded(
   placement: PlacementId,
   onReward: () => void,
+  extra?: BoosterId,
 ): Promise<boolean> {
   const availability = adAvailability(placement);
   if (!availability.ok) {
@@ -292,6 +299,10 @@ export async function watchRewarded(
     onReward();
     sfx.coin();
     haptics.clear();
+    // 계정 서버가 금액·쿨다운·하루 상한을 쥐는 지면이면 여기서 함께 알린다 — 여기
+    // 한 곳만 고치면 광고 버튼을 쓰는 모든 자리가 같이 적용된다. 서버가 모르는 지면
+    // (룰렛, 부활용 광고)은 `claimAdRewardIfOwned` 가 조용히 넘어간다.
+    claimAdRewardIfOwned(placement, extra);
     return true;
   }
   toast(outcome.status === 'skipped' ? t('adSkipped') : t('adFailed'), 'warn');
@@ -306,7 +317,7 @@ export function adButton(
   placement: PlacementId,
   label: string,
   onReward: () => void,
-  opts: { class?: string; onDone?: (rewarded: boolean) => void } = {},
+  opts: { class?: string; onDone?: (rewarded: boolean) => void; extra?: BoosterId } = {},
 ): HTMLButtonElement {
   const availability = adAvailability(placement);
   const btn = el(
@@ -324,7 +335,7 @@ export function adButton(
     btn.disabled = true;
     sfx.tap();
     haptics.tap();
-    const rewarded = await watchRewarded(placement, onReward);
+    const rewarded = await watchRewarded(placement, onReward, opts.extra);
     opts.onDone?.(rewarded);
     if (!rewarded && document.body.contains(btn)) {
       const next = adAvailability(placement);
