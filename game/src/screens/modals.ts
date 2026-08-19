@@ -4,7 +4,9 @@ import { adButton, button, cn, el, iconButton, openModal, toast, watchRewarded }
 import { amount, icon, type IconName } from '../icons.ts';
 import { LANGS, LANG_LABEL, formatDuration, predatorLabel, t, tf } from '../i18n.ts';
 import { depthT, predatorFor, type PredatorKind } from '../levels.ts';
-import { getSave, mutateSave, type BoosterId } from '../storage.ts';
+import { getSave, hasNoAds, mutateSave, type BoosterId } from '../storage.ts';
+import { buyRemoveAds, isRemoveAdsPurchasable, vxRemoveAdsPrice, watchVxShop } from '../net/vx.ts';
+import { refreshAccountRemote } from '../net/serverAccount.ts';
 import {
   BOOSTER_PRICE,
   DAILY_REWARDS,
@@ -144,65 +146,129 @@ export function boosterMeta(id: BoosterId): { name: string; desc: string; icon: 
   return { name: t(meta.name), desc: t(meta.desc), icon: meta.icon };
 }
 
+/**
+ * 광고제거 상품 한 줄. 상점 목록(`.shop-item`)과 같은 골격을 쓰되, 재화가 진주가
+ * 아니라 VX 결제라 `priceButton` 대신 상태 텍스트 버튼을 쓴다 — TowerWar
+ * `shop-scene.ts` 가 유료 칸에 가격/보유/준비중 셋 중 하나를 적는 것과 같은 규칙.
+ */
+function removeAdsRow(): HTMLElement {
+  const owned = hasNoAds();
+  const purchasable = isRemoveAdsPurchasable();
+  const stateLabel = owned
+    ? t('removeAdsOwned')
+    : purchasable
+      ? `${vxRemoveAdsPrice().toLocaleString()} VX`
+      : t('removeAdsComingSoon');
+
+  const stateBtn = el('button', { class: 'btn btn-buy', disabled: owned || !purchasable ? 'disabled' : undefined },
+    el('span', { text: stateLabel }),
+  );
+  if (!owned && purchasable) {
+    stateBtn.addEventListener('click', () => {
+      sfx.tap();
+      // 결제창이 새 탭/오버레이로 뜬다 — 여기서는 열기만 하고 끝난다. 실제 지급은
+      // server.js 의 $onItemPurchased 가 하고, 결제창이 닫히면 위의 watchVxShop
+      // 콜백이 서버 계정을 다시 읽어 이 줄을 갱신한다(rebuild).
+      if (!buyRemoveAds()) toast(t('adFailed'), 'warn');
+    });
+  }
+
+  return el(
+    'div',
+    { class: cn('shop-item', 'shop-item-premium') },
+    el(
+      'div',
+      { class: 'shop-info' },
+      el('strong', { text: t('removeAdsTitle') }),
+      el('small', { text: t('removeAdsDesc') }),
+    ),
+    stateBtn,
+  );
+}
+
 export function openShopModal(refresh: Refresh): void {
-  openModal((close) => {
-    const body = el('div', { class: 'modal-body' });
+  // 결제창은 이 모달 위에 뜨는 별개의 오버레이라, 결제가 끝나도 이 모달 자체는 그대로
+  // 남는다 — 그래서 모달이 열려 있는 동안 직접 VXShop 을 구독해 뒀다가 결제가 끝나면
+  // 서버 계정을 다시 읽고(refreshAccountRemote) 이 자리에서 바로 다시 그린다.
+  // 모달이 닫히면(어느 경로로든) openModal 의 onClose 가 구독을 정리한다.
+  let stopVxWatch: (() => void) | null = null;
 
-    const rebuild = (): void => {
-      body.replaceChildren();
-      const save = getSave();
+  openModal(
+    (close) => {
+      const body = el('div', { class: 'modal-body' });
 
-      body.append(
-        el('p', { class: 'modal-lead' }, `${t('pearls')} `, amount('pearl', save.pearls, 18)),
-        // [광고 지면] 상점 무료 진주
-        adButton('shop-free-coin', tf('freeCoinDesc', { n: 120 }), () => {
-          addPearls(120);
-          toast(tf('rewardPearls', { n: 120 }));
-        }, { onDone: () => { refresh(); rebuild(); } }),
-      );
+      const rebuild = (): void => {
+        body.replaceChildren();
+        const save = getSave();
 
-      const list = el('div', { class: 'shop-list' });
-      for (const id of SHOP_BOOSTERS) {
-        const meta = boosterMeta(id);
-        const owned = save.boosters[id] ?? 0;
-        list.append(
-          el(
-            'div',
-            { class: 'shop-item' },
-            icon(meta.icon, 34, 'shop-icon'),
+        body.append(
+          el('p', { class: 'modal-lead' }, `${t('pearls')} `, amount('pearl', save.pearls, 18)),
+          removeAdsRow(),
+          // [광고 지면] 상점 무료 진주 — 광고제거를 샀으면 adButton() 이 알아서 '받기'로 바뀐다.
+          adButton('shop-free-coin', tf('freeCoinDesc', { n: 120 }), () => {
+            addPearls(120);
+            toast(tf('rewardPearls', { n: 120 }));
+          }, { onDone: () => { refresh(); rebuild(); } }),
+        );
+
+        const list = el('div', { class: 'shop-list' });
+        for (const id of SHOP_BOOSTERS) {
+          const meta = boosterMeta(id);
+          const owned = save.boosters[id] ?? 0;
+          list.append(
             el(
               'div',
-              { class: 'shop-info' },
-              // 보유 수를 제목에 `×0` 으로 붙이면 '수량 0짜리 상품'처럼 읽혀 고장난 것 같다.
-              // 제목은 상품 이름만 두고, 보유 수는 따로 뺀다.
-              el('strong', { text: meta.name }),
-              el('small', { text: meta.desc }),
-              el('em', { class: 'shop-owned', text: tf('owned', { n: owned }) }),
+              { class: 'shop-item' },
+              icon(meta.icon, 34, 'shop-icon'),
+              el(
+                'div',
+                { class: 'shop-info' },
+                // 보유 수를 제목에 `×0` 으로 붙이면 '수량 0짜리 상품'처럼 읽혀 고장난 것 같다.
+                // 제목은 상품 이름만 두고, 보유 수는 따로 뺀다.
+                el('strong', { text: meta.name }),
+                el('small', { text: meta.desc }),
+                el('em', { class: 'shop-owned', text: tf('owned', { n: owned }) }),
+              ),
+              priceButton(BOOSTER_PRICE[id], () => {
+                if (!buyBooster(id)) {
+                  toast(t('notEnoughPearls'), 'warn');
+                  return;
+                }
+                sfx.coin();
+                refresh();
+                rebuild();
+              }),
             ),
-            priceButton(BOOSTER_PRICE[id], () => {
-              if (!buyBooster(id)) {
-                toast(t('notEnoughPearls'), 'warn');
-                return;
-              }
-              sfx.coin();
-              refresh();
-              rebuild();
-            }),
-          ),
-        );
-      }
+          );
+        }
 
-      // 하트는 상점에서 팔지 않는다.
-      //
-      // 하트가 없어서 막힌 사람은 상점이 아니라 하트 모달에서 막힌다. 파는 자리를
-      // 거기 하나로 두면 "막혔다 → 바로 살 수 있다"가 한 화면 안에서 끝난다.
-      // 상점에도 같은 물건을 두면 목록만 길어지고 진입 지점이 둘로 갈린다.
-      body.append(list);
-    };
+        // 하트는 상점에서 팔지 않는다.
+        //
+        // 하트가 없어서 막힌 사람은 상점이 아니라 하트 모달에서 막힌다. 파는 자리를
+        // 거기 하나로 두면 "막혔다 → 바로 살 수 있다"가 한 화면 안에서 끝난다.
+        // 상점에도 같은 물건을 두면 목록만 길어지고 진입 지점이 둘로 갈린다.
+        body.append(list);
+      };
 
-    rebuild();
-    return el('div', {}, modalHeader(t('shop'), close), body);
-  });
+      // 결제창이 닫히면(성공이든 취소든) 이 모달을 다시 그린다. 성공했을 때만 서버
+      // 계정을 다시 읽는다 — 취소는 서버에 아무 변화가 없으므로 rebuild() 만으로
+      // 충분하고(대시보드 값이 그새 바뀌었을 수 있으니), 굳이 서버를 다시 부르지 않는다.
+      stopVxWatch = watchVxShop((purchased) => {
+        if (purchased) {
+          void refreshAccountRemote().finally(() => {
+            refresh();
+            rebuild();
+          });
+        } else {
+          rebuild();
+        }
+      });
+
+      rebuild();
+      return el('div', {}, modalHeader(t('shop'), close), body);
+    },
+    { onClose: () => stopVxWatch?.() },
+  );
 }
 
 // ---------- 불가사리 ----------

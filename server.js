@@ -35,6 +35,13 @@
  *   - **부스터·하트 구매, 저금통 열기**: 가격표와 잔액 검사를 서버가 하고 한 번에 원자적으로
  *     깎고 지급한다(계정 자물쇠 `$lock` 안에서).
  *   - **일일 보상**: 스트릭·요일 판정을 서버 시계로 계산한다.
+ *   - **광고제거 구매**: 클라이언트는 구매 여부를 자칭할 수 없다. VXShop 결제가 끝나면
+ *     Verse8 플랫폼이 `$sender` 문맥 없이 서버에 직접 `$onItemPurchased` 를 불러
+ *     `noAds` 를 켠다 — TowerWar server.js 의 `entitlements`/`vxPurchaseIds` 와 같은
+ *     자리(§ `$onItemPurchased` 주석). 광고제거를 사도 광고 지면의 하루 상한·쿨다운은
+ *     그대로 적용된다 — 서버 표(`AD_PLACEMENTS`)를 그대로 쓴다. 없애는 것은 광고
+ *     재생뿐이고, 지면이 버는 재화 페이스는 광고를 계속 보는 사람과 같게 둔다(그렇지
+ *     않으면 "광고제거"가 사실상 "무제한 재화"가 된다).
  *
  * 룰렛(`lucky-wheel-spin`)과 부활용 광고(`revive-extra-moves`/`oxygen-refill`)는 이번에는
  * 서버로 안 옮겼다 — 아래 각 자리에 이유를 적어 뒀다. 정직하게 미룬 것이지 숨긴 게 아니다.
@@ -186,6 +193,14 @@ const AD_GRANTS = {
   'piggy-bank-boost': { piggy: 150 },
 };
 
+/**
+ * 광고제거 상품 ID. **Verse8 대시보드에 등록된 상품 ID와 정확히 같아야 한다.**
+ * `game/src/net/vx.ts` 의 `REMOVE_ADS_PRODUCT` 와도 같아야 한다 — 셋(대시보드·이
+ * 상수·클라이언트 상수) 중 하나라도 어긋나면 `$onItemPurchased` 가 결제를 못 알아봐서
+ * 돈은 나갔는데 지급은 조용히 안 일어난다.
+ */
+const REMOVE_ADS_PRODUCT = 'remove_ads';
+
 function num(v) {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
@@ -224,6 +239,12 @@ function defaultAccount(account) {
     // "방금 번 것의 두 배" 지급용 포인터. claimAdReward 의 daily-chest/double-coins 가 쓴다.
     lastDaily: null,
     lastLevelClear: null,
+    // 광고제거 구매 여부. **`$onItemPurchased` 로만 켜진다** — syncAccount 의 patch
+    // 화이트리스트(pickClientPatch)에 없으므로 클라이언트가 직접 켤 방법이 없다.
+    noAds: false,
+    // 이미 처리한 VXShop 구매 ID. 결제 웹훅이 중복 전달돼도(재시도 등) 두 번 지급하지
+    // 않는 자물쇠다 — TowerWar server.js 의 같은 이름, 같은 자리.
+    vxPurchaseIds: [],
   };
 }
 
@@ -261,6 +282,10 @@ function cleanLevelStars(raw) {
  * 그대로 받아들이면 조작된 값을 심어 두고 바로 `claimAdReward('double-coins')` 를 불러
  * 무제한으로 진주를 받아 갈 수 있다. `dailyClaimedDay`/`dailyStreak` 도 같은 이유로 뺐다 —
  * `claimDaily` 만 쓰는 값이라 여기서 받을 이유가 없다.
+ *
+ * **`noAds`/`vxPurchaseIds` 도 여기 없다.** 결제 상태다 — 화이트리스트에 넣으면
+ * `syncAccount({ noAds: true })` 한 번으로 돈 안 내고 광고제거를 자칭할 수 있다.
+ * 오직 `$onItemPurchased` 만 이 값을 켠다.
  */
 function pickClientPatch(p) {
   const out = {};
@@ -328,6 +353,10 @@ function normalizeAccount(raw, account) {
             doubled: raw.lastLevelClear.doubled === true,
           }
         : null,
+    noAds: raw.noAds === true,
+    vxPurchaseIds: Array.isArray(raw.vxPurchaseIds)
+      ? [...new Set(raw.vxPurchaseIds.filter((id) => typeof id === 'string'))].slice(-50)
+      : [],
   };
 }
 
@@ -442,6 +471,38 @@ class Server {
       };
       return await this.#saveAccount(merged);
     });
+  }
+
+  /**
+   * Verse8 가 VXShop 결제를 마친 뒤 서버에서 직접 부른다. **`$sender` 문맥이 아니다** —
+   * 플랫폼이 계정을 인자로 실어 보낸다(TowerWar server.js 의 같은 메서드와 같은 자리).
+   * 클라이언트는 이 경로를 부를 수 없으므로 구매 여부를 자칭할 방법이 없다 — 지급은
+   * 오직 여기서만 일어난다.
+   *
+   * **`purchaseId` 로 중복 지급을 막는다.** 결제 웹훅은 재시도·중복 전달될 수 있다 —
+   * 이미 처리한 `purchaseId` 면 조용히 넘어간다(에러도, 추가 지급도 아니다). 어디까지나
+   * `vxPurchaseIds`(최근 50개, TowerWar 와 같은 상한)에 있는지만 본다.
+   *
+   * 상한이 왜 문제가 안 되는가: 이 계정이 같은 상품을 50번 넘게 살 일은 없다 — 광고제거는
+   * 계정당 한 번이면 충분한 상품이라(재구매해도 `noAds` 는 이미 true), 오래된
+   * `purchaseId` 가 상한 밖으로 밀려나 다시 처리돼도 실질적인 문제가 없다(다시 `noAds:
+   * true` 를 쓸 뿐).
+   */
+  async $onItemPurchased({ account, purchaseId, productId }) {
+    if (!account || !purchaseId || productId !== REMOVE_ADS_PRODUCT) {
+      return { success: false };
+    }
+    await $lock(`acct:${account}`, async () => {
+      const raw = await $global.getUserState(account);
+      const a = normalizeAccount(raw, account);
+      if (a.vxPurchaseIds.includes(purchaseId)) return;
+      await $global.updateUserState(account, {
+        ...a,
+        noAds: true,
+        vxPurchaseIds: [...a.vxPurchaseIds, purchaseId].slice(-50),
+      });
+    });
+    return { success: true };
   }
 
   /**

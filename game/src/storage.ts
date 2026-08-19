@@ -66,6 +66,15 @@ export interface SaveData {
   piggy: number;
   adCounters: Record<string, AdCounter>;
   /**
+   * 광고제거 구매 여부. **이 필드는 서버(`server.js` 의 `$onItemPurchased`)가 확인해 준
+   * 값을 옮겨 적는 캐시일 뿐, 이 필드를 켜는 것만으로 진짜 구매가 되지는 않는다** —
+   * `net/serverAccount.ts` 의 `applyServerAccount` 만 이 값을 쓴다. 오프라인일 때도
+   * 광고제거 버튼이 계속 '받기'로 보이려면 로컬에 남아 있어야 해서 다른 계정 값들과
+   * 같은 자리(SaveData)에 둔다 — 저장 자체를 지워야 사라진다는 뜻인데, 그 경우엔
+   * 다음 접속 때 서버가 다시 true 로 되돌려 준다(§ storage.ts 는 사본, 서버가 진짜).
+   */
+  noAds: boolean;
+  /**
    * 소리는 배경음과 효과음을 따로 잡는다 (0..1).
    *
    * 하나의 on/off 로 묶어두면 "음악만 끄고 효과음은 듣고 싶다"를 못 한다 —
@@ -96,6 +105,10 @@ export function defaultSave(): SaveData {
     wheelFreeDay: '',
     piggy: 0,
     adCounters: {},
+    // 신규 저장·guest 는 당연히 false 다. 서버가 있으면 첫 동기화(initServerAccount) 때
+    // 진짜 값으로 갈아 끼워진다 — 그 전까지는 "아직 모른다" 를 "안 샀다" 로 취급한다
+    // (net/serverAccount.ts 머리말의 실패 방향 참고).
+    noAds: false,
     // 배경음은 효과음보다 낮게 깔아야 효과음이 묻히지 않는다
     settings: { bgmVolume: 0.7, sfxVolume: 1, haptics: true, lang: 'ko' },
     nickname: '',
@@ -240,6 +253,18 @@ export async function loadSave(): Promise<SaveData> {
 
 export function getSave(): SaveData {
   return cache;
+}
+
+/**
+ * 광고제거를 샀는가. `ui.ts` 의 `adAvailability()`/`adButton()` 이 광고 지면을
+ * '받기' 모드로 바꿀지 정하는 갈림길이다.
+ *
+ * **읽기 전용 창구다** — 이 값을 켜는 것은 오직 서버(`server.js` 의
+ * `$onItemPurchased`)이고, 클라이언트는 `net/serverAccount.ts` 의
+ * `applyServerAccount` 를 거쳐 받은 값을 여기서 읽기만 한다.
+ */
+export function hasNoAds(): boolean {
+  return getSave().noAds === true;
 }
 
 /** 저장 데이터를 바꾸고 디바운스 저장한다. */

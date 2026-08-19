@@ -481,6 +481,72 @@ as(A);
   check('서로 다른 계정이다', a.account !== b.account, { a: a.account, b: b.account });
 }
 
+// 13) $onItemPurchased — 광고제거 구매. **플랫폼이 $sender 문맥 없이 직접 부른다** —
+//     그래서 as() 로 세션을 잡지 않고 account 를 인자로 그대로 넣는다. 결과 확인만
+//     as(A) 로 세션을 잡아 getAccount()/syncAccount() 를 부른다.
+reset('0xAAA');
+{
+  const wrongProduct = await server.$onItemPurchased({
+    account: '0xAAA',
+    purchaseId: 'p1',
+    productId: 'not_remove_ads',
+  });
+  check('모르는 상품 ID는 거부한다 (success:false)', wrongProduct.success === false, wrongProduct);
+
+  as(A);
+  const before = await server.getAccount();
+  check('구매 전에는 광고제거가 꺼져 있다', before.noAds === false, before.noAds);
+  check('아직 저장된 것이 없다 (조회만으로는 계정을 안 만든다)', userStates.get('0xAAA') === undefined);
+
+  const result = await server.$onItemPurchased({ account: '0xAAA', purchaseId: 'p1', productId: 'remove_ads' });
+  check('정상 결제는 성공으로 응답한다', result.success === true, result);
+
+  const after = await server.getAccount();
+  check('광고제거가 켜진다', after.noAds === true, after.noAds);
+  check('구매 ID가 기록된다', after.vxPurchaseIds.includes('p1'), after.vxPurchaseIds);
+
+  // 결제 웹훅이 같은 purchaseId 로 두 번 와도(재시도·중복 전달) 두 번 처리하지 않는다.
+  // noAds 는 불리언이라 "두 번 켜짐"이 값으로는 안 보이므로, vxPurchaseIds 에 중복이
+  // 안 쌓이는가로 실제 중복 처리 여부를 확인한다.
+  await server.$onItemPurchased({ account: '0xAAA', purchaseId: 'p1', productId: 'remove_ads' });
+  const afterDup = await server.getAccount();
+  check(
+    '같은 purchaseId 는 중복 처리되지 않는다 (vxPurchaseIds 에 한 번만)',
+    afterDup.vxPurchaseIds.filter((id) => id === 'p1').length === 1,
+    afterDup.vxPurchaseIds,
+  );
+
+  const missingAccount = await server.$onItemPurchased({ account: '', purchaseId: 'p2', productId: 'remove_ads' });
+  check('account 가 비어 있으면 거부한다', missingAccount.success === false, missingAccount);
+
+  const missingPurchaseId = await server.$onItemPurchased({ account: '0xAAA', purchaseId: '', productId: 'remove_ads' });
+  check('purchaseId 가 비어 있으면 거부한다', missingPurchaseId.success === false, missingPurchaseId);
+
+  // syncAccount 의 patch 화이트리스트(pickClientPatch)에 noAds/vxPurchaseIds 가 없으므로
+  // 클라이언트가 재동기화로 값을 건드려도(끄려는 시도) 안 먹는다.
+  const afterSync = await server.syncAccount({ pearls: 10, noAds: false, vxPurchaseIds: [] });
+  check('syncAccount 로는 광고제거를 끌 수 없다', afterSync.noAds === true, afterSync.noAds);
+  check('syncAccount 로는 vxPurchaseIds 를 비울 수 없다', afterSync.vxPurchaseIds.includes('p1'), afterSync.vxPurchaseIds);
+}
+
+// 13.5) syncAccount 의 **첫 동기화(마이그레이션)** 로도 noAds 를 심을 수 없다 —
+//   조작된 클라이언트가 첫 접속인 척 noAds:true 를 실어 보내는 경로까지 막혀야 한다.
+reset('0xDDD');
+const D = { account: '0xDDD' };
+as(D);
+{
+  const migrated = await server.syncAccount({ pearls: 10, noAds: true, vxPurchaseIds: ['fake'] });
+  check('마이그레이션 patch 로도 noAds 를 켤 수 없다', migrated.noAds === false, migrated.noAds);
+  check('마이그레이션 patch 로도 vxPurchaseIds 를 심을 수 없다', migrated.vxPurchaseIds.length === 0, migrated.vxPurchaseIds);
+}
+
+// 13.7) 계정끼리 광고제거 상태가 섞이지 않는다 (0xAAA 만 샀다, 0xBBB 는 그대로)
+{
+  as(B);
+  const b = await server.getAccount();
+  check('다른 계정은 광고제거의 영향을 안 받는다', b.noAds === false, b.noAds);
+}
+
 // ── 결과 ────────────────────────────────────────────────────────
 const failed = results.filter((r) => !r.ok);
 for (const r of results) {

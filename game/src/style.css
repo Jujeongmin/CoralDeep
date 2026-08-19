@@ -538,6 +538,25 @@ body {
   letter-spacing: 0.1em;
 }
 
+/* 광고제거 구매자의 '받기' 버튼 — 같은 자리(.btn-ad)를 그대로 쓰되, 경고 테이프의
+ * 황색을 탈출구 신호 녹색으로 바꿔 "광고가 아니라 그냥 받을 수 있다"를 색으로도 말한다. */
+.btn-ad.btn-claim {
+  border-color: rgba(95, 224, 160, 0.5);
+}
+
+.btn-ad.btn-claim::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--signal) 0 6px,
+    #06231a 6px 12px
+  );
+}
+
+.btn-ad.btn-claim .ad-tag {
+  background: var(--signal);
+  color: #06231a;
+}
+
 /* ---------- 아이콘 ---------- */
 
 /* 아이콘은 장비에 새긴 그림이다.
@@ -1531,6 +1550,13 @@ body {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
+}
+
+/* 진주가 아니라 VX 로 사는 유일한 칸(광고제거) — 목록 맨 위, 황동 테두리로 다른 물건과
+ * 다른 결제 수단임을 표시한다. 부스터 칸과 같은 골격(.shop-item)은 그대로 따른다. */
+.shop-item-premium {
+  border-color: var(--brass);
+  background: linear-gradient(180deg, var(--hull-hi), var(--hull));
 }
 
 /* ---------- 배급 일지 (일일 보상) ----------

@@ -43,6 +43,9 @@ export interface RemoteAccount {
   piggy: number;
   dailyClaimedDay: string;
   dailyStreak: number;
+  /** 광고제거 구매 여부. **오직 `server.js` 의 `$onItemPurchased` 만 이 값을 켠다** —
+   * 클라이언트가 자칭할 수 있는 자리가 없다(`syncAccount` 의 patch 화이트리스트에도 없다). */
+  noAds: boolean;
 }
 
 /** 서버 호출이 이 시간(ms) 안에 안 끝나면 포기한다. 로컬이 이미 할 일을 다 했으므로
@@ -110,6 +113,9 @@ function applyServerAccount(remote: RemoteAccount): void {
     s.tasksDone = [...new Set([...s.tasksDone, ...remote.tasksDone])];
     s.dailyClaimedDay = remote.dailyClaimedDay;
     s.dailyStreak = remote.dailyStreak;
+    // 한 번 켜지면 끄는 함수가 없다 — 서버도 `noAds` 를 내리는 경로가 없으므로
+    // (§ server.js `$onItemPurchased`), 여기서도 그대로 옮겨 적기만 한다.
+    s.noAds = remote.noAds;
   });
 }
 
@@ -156,6 +162,21 @@ export async function initServerAccount(): Promise<void> {
  * 계정에 반영한다. 실패해도 다음 기회에 다시 보내면 된다. */
 export function syncNow(): void {
   void call<RemoteAccount>('syncAccount', [snapshotForSync()]).then((remote) => {
+    if (remote) applyServerAccount(remote);
+  });
+}
+
+/**
+ * 서버 계정을 로컬 스냅샷 없이 그냥 다시 읽어 반영한다.
+ *
+ * `syncAccount` 와 달리 로컬이 알고 있던 것을 실어 보내지 않는다 — **서버에서 방금
+ * 일어난, 로컬은 아직 모르는 변화를 끌어올 때** 쓴다. 지금 이 함수를 부르는 유일한
+ * 자리는 광고제거 결제 직후(`net/vx.ts` 의 `watchVxShop` 콜백) 뿐이다: 결제는
+ * `server.js` 의 `$onItemPurchased` 가 서버에서 직접 지급하므로, 클라이언트는 "샀다"는
+ * 사실 자체를 로컬에 들고 있지 않다 — 서버에 물어봐야만 안다.
+ */
+export function refreshAccountRemote(): Promise<void> {
+  return call<RemoteAccount>('getAccount', []).then((remote) => {
     if (remote) applyServerAccount(remote);
   });
 }

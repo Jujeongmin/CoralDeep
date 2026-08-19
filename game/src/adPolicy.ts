@@ -86,14 +86,35 @@ function counterFor(id: string, now: number): { day: string; count: number; last
   return c;
 }
 
-/** 이 지면을 지금 보여줄 수 있는가 */
-export function canShow(id: PlacementId, now: number = Date.now()): boolean {
-  if (unsupportedEnv) return false;
+/** 하루 상한·쿨다운만 본다. 광고 SDK 가 이 환경에서 막혔는가(unsupportedEnv)는 안 본다 —
+ * canShow() 와 canClaim() 이 이 위에서 갈라진다. */
+function withinLimits(id: PlacementId, now: number): boolean {
   const def = PLACEMENTS[id];
   const c = counterFor(id, now);
   if (c.count >= def.dailyCap) return false;
   if (c.lastAt > 0 && now - c.lastAt < def.cooldownMs) return false;
   return true;
+}
+
+/** 이 지면의 광고를 지금 보여줄 수 있는가 */
+export function canShow(id: PlacementId, now: number = Date.now()): boolean {
+  if (unsupportedEnv) return false;
+  return withinLimits(id, now);
+}
+
+/**
+ * 광고제거를 산 사람이 이 지면을 지금 '받기'로 쓸 수 있는가.
+ *
+ * **하루 상한·쿨다운은 canShow() 와 똑같이 적용한다** — 광고제거는 광고 재생을 없앨
+ * 뿐, 지면이 버는 재화의 페이스까지 없애면 사실상 "무제한 재화" 상품이 된다
+ * (`ui.ts` 의 `adAvailability` 주석 참고).
+ *
+ * **`unsupportedEnv` 는 안 본다.** 그 래치는 광고 SDK 가 이 환경에서 광고를 못 튼다는
+ * 뜻인데(ads.ts), 광고제거 구매자는 애초에 광고를 안 트니 상관없는 사정이다 — 이 래치
+ * 때문에 이미 돈을 낸 사람의 '받기' 버튼까지 죽으면 안 된다.
+ */
+export function canClaim(id: PlacementId, now: number = Date.now()): boolean {
+  return withinLimits(id, now);
 }
 
 /** 쿨다운이 끝날 때까지 남은 ms (0 = 지금 가능) */

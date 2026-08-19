@@ -18,6 +18,7 @@ import { renderLevel } from './screens/level.ts';
 import { refreshHearts } from './economy.ts';
 import { unlockAudio } from './audio.ts';
 import { initServerAccount, syncNow } from './net/serverAccount.ts';
+import { initVxShop } from './net/vx.ts';
 
 /**
  * Verse8 플랫폼이 iframe URL 에 넣어주는 ?auth= 토큰에서 계정을 꺼낸다.
@@ -59,6 +60,12 @@ async function boot(): Promise<void> {
   // loadSave() 로 준비됐으므로, 접속이 느리거나 서버가 없어도(배포 전, 오프라인)
   // 첫 화면 진입을 막지 않는다. 서버 값이 오면 그때 로컬을 계정 값으로 맞춘다.
   void initServerAccount();
+
+  // VXShop 카탈로그(광고제거 가격·구매 가능 여부)도 미리 당겨 둔다. 상점을 열 때 처음
+  // 부르면 그 순간 로딩 중이라 폴백 가격이 잠깐 보였다가 실제 값으로 바뀐다 — 여기서
+  // 미리 불러 두면 그 깜빡임이 줄어든다. 실패해도(배포 전, 오프라인) 조용히 넘어간다
+  // (`net/vx.ts` 의 `vxRemoveAdsPrice`/`isRemoveAdsPurchasable` 이 폴백을 갖고 있다).
+  initVxShop();
 
   setHost(app);
   registerScreen('map', renderMap);

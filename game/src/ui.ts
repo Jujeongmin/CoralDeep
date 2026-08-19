@@ -1,13 +1,13 @@
 // DOM 헬퍼 · 토스트 · 모달 · 광고 버튼.
 
 import { showRewarded, adBusy } from './ads.ts';
-import { canShow, cooldownLeft, remainingToday, type PlacementId } from './adPolicy.ts';
+import { canClaim, canShow, cooldownLeft, noteShown, remainingToday, type PlacementId } from './adPolicy.ts';
 import { formatDuration, t, tf } from './i18n.ts';
 import { sfx } from './audio.ts';
 import { haptics } from './haptics.ts';
 import { icon, type IconName } from './icons.ts';
 import { claimAdRewardIfOwned } from './net/serverAccount.ts';
-import type { BoosterId } from './storage.ts';
+import { hasNoAds, type BoosterId } from './storage.ts';
 
 type Child = Node | string | null | undefined | false;
 
@@ -192,7 +192,7 @@ export interface ModalHandle {
  */
 export function openModal(
   build: (close: () => void) => HTMLElement,
-  opts: { dismissable?: boolean; class?: string } = {},
+  opts: { dismissable?: boolean; class?: string; onClose?: () => void } = {},
 ): ModalHandle {
   const dismissable = opts.dismissable !== false;
   const previous = document.activeElement as HTMLElement | null;
@@ -206,6 +206,9 @@ export function openModal(
     backdrop.classList.add('out');
     window.setTimeout(() => backdrop.remove(), 180);
     previous?.focus?.();
+    // Esc·바깥 클릭·닫기 버튼 등 어느 경로로 닫히든 여기 한 곳을 반드시 거친다 —
+    // 모달이 열려 있는 동안만 켜 둔 구독(상점의 watchVxShop 등)을 정리할 자리다.
+    opts.onClose?.();
   };
 
   const panel = el(
@@ -263,19 +266,62 @@ export function openModal(
   return { close, root: panel };
 }
 
-// ---------- 광고 ----------
+// ---------- 광고 / 광고제거 ----------
 
-/** 이 지면을 지금 쓸 수 있는지, 못 쓰면 왜인지 */
-export function adAvailability(placement: PlacementId): { ok: boolean; reason: string } {
-  if (canShow(placement)) return { ok: true, reason: '' };
-  if (remainingToday(placement) <= 0) return { ok: false, reason: t('adDailyDone') };
+export interface AdAvailability {
+  ok: boolean;
+  reason: string;
+  /**
+   * 'claim' 이면 광고제거를 산 사람이다 — 버튼이 광고 없이 바로 받는 '받기'로 뜬다.
+   * 'ad' 면 지금까지처럼 광고를 봐야 한다. adButton() 이 이 값으로 태그·클릭 동작을 가른다.
+   */
+  mode: 'ad' | 'claim';
+}
+
+/** ok:false 일 때 보여줄 이유. canShow/canClaim 둘 다 같은 표(하루 상한 -> 쿨다운 -> 그 외)를 쓴다. */
+function unavailableReason(placement: PlacementId): string {
+  if (remainingToday(placement) <= 0) return t('adDailyDone');
   const left = cooldownLeft(placement);
-  if (left > 0) return { ok: false, reason: tf('adCooldown', { n: formatDuration(left) }) };
-  return { ok: false, reason: t('adUnavailable') };
+  if (left > 0) return tf('adCooldown', { n: formatDuration(left) });
+  return t('adUnavailable');
 }
 
 /**
- * 보상형 광고를 재생하고, 끝까지 본 경우에만 onReward 를 부른다.
+ * 이 지면을 지금 쓸 수 있는지, 못 쓰면 왜인지, 그리고 광고제거 여부에 따라 어느
+ * 모드('ad'/'claim')로 보여줄지.
+ *
+ * **광고제거를 사도 하루 상한·쿨다운은 그대로 적용한다.** 이 지면들은 광고를 보는
+ * 대가로 재화를 주는 것이지 재화 자체가 무제한은 아니다 — 상한을 없애면 "광고를 안 봐도
+ * 되는 상품"이 아니라 "재화가 무제한인 상품"이 되어 버려서, 광고제거 구매 하나가
+ * 게임 경제 전체를 무너뜨린다. 광고제거가 없애는 것은 **광고 재생**뿐이다. 그래서
+ * '받기' 버튼도 쿨다운이 남아 있으면 똑같이 비활성화되고 남은 시간을 보여준다 —
+ * 광고 버튼과 같은 방식으로 "지금은 안 된다"를 말하지, 죽은 버튼처럼 보이지 않는다.
+ */
+export function adAvailability(placement: PlacementId): AdAvailability {
+  const mode: AdAvailability['mode'] = hasNoAds() ? 'claim' : 'ad';
+  const ok = mode === 'claim' ? canClaim(placement) : canShow(placement);
+  return { ok, reason: ok ? '' : unavailableReason(placement), mode };
+}
+
+/** 광고 재생 없이 바로 보상을 준다 (광고제거 구매자 전용 경로). 카운터 소비·계정 반영은
+ * 광고를 실제로 본 경로(watchRewarded 의 rewarded 분기)와 완전히 같다 — 광고 유무만 다르다. */
+function claimDirect(placement: PlacementId, onReward: () => void, extra?: BoosterId): boolean {
+  const availability = adAvailability(placement);
+  if (!availability.ok) {
+    toast(availability.reason, 'warn');
+    return false;
+  }
+  noteShown(placement);
+  onReward();
+  sfx.coin();
+  haptics.clear();
+  claimAdRewardIfOwned(placement, extra);
+  return true;
+}
+
+/**
+ * 보상형 광고를 재생하고, 끝까지 본 경우에만 onReward 를 부른다. 광고제거를 산 사람은
+ * 광고를 아예 안 틀고 claimDirect() 로 바로 보상을 받는다.
  * 반드시 사용자 클릭 핸들러 안에서 호출할 것.
  *
  * @param extra 부스터를 고르는 지면(`free-booster-prelevel`/`free-booster-ingame`)에서
@@ -287,6 +333,8 @@ export async function watchRewarded(
   onReward: () => void,
   extra?: BoosterId,
 ): Promise<boolean> {
+  if (hasNoAds()) return claimDirect(placement, onReward, extra);
+
   const availability = adAvailability(placement);
   if (!availability.ok) {
     toast(availability.reason, 'warn');
@@ -312,6 +360,11 @@ export async function watchRewarded(
 /**
  * 보상형 광고 버튼. 쿨다운/일일 상한이면 자동으로 비활성화되고 이유를 보여준다.
  * 광고 재생 중에는 중복 클릭을 막는다.
+ *
+ * **열두 지면 전부 이 함수 하나를 거친다** — 광고제거를 산 사람에게는 `adAvailability()`
+ * 가 'claim' 모드를 돌려주고, 여기서 태그가 'AD' 대신 '받기'로, 클릭이 광고 재생 대신
+ * 즉시 지급으로 바뀐다. 지면마다 호출부를 손대지 않고 이 한 곳만 고치면 전부 같이
+ * 바뀐다 — 새 광고 지면이 생겨도 adButton() 을 쓰는 한 자동으로 이 규칙을 따른다.
  */
 export function adButton(
   placement: PlacementId,
@@ -323,10 +376,10 @@ export function adButton(
   const btn = el(
     'button',
     {
-      class: `btn btn-ad ${opts.class ?? ''}`.trim(),
+      class: cn('btn btn-ad', availability.mode === 'claim' && 'btn-claim', opts.class),
       disabled: availability.ok ? undefined : 'disabled',
     },
-    el('span', { class: 'ad-tag', text: 'AD' }),
+    el('span', { class: 'ad-tag', text: availability.mode === 'claim' ? t('claimTag') : 'AD' }),
     el('span', { class: 'btn-label', text: availability.ok ? label : availability.reason }),
   );
 
