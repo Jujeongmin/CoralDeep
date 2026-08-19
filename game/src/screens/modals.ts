@@ -31,7 +31,7 @@ import {
 import { applyVolumes, sfx, startAmbience } from '../audio.ts';
 import { navigate, reloadScreen } from '../router.ts';
 import { createWheel } from './wheelView.ts';
-import { drawPart, preloadSprites, spritesReady } from '../sprites.ts';
+import { predatorArt } from '../render/predatorArt.ts';
 import type { PreBooster } from '../core/engine.ts';
 
 type Refresh = () => void;
@@ -754,102 +754,6 @@ export function openWinModal(
   );
 }
 
-// ---- 곰치 머리 리그 (render/eelRig.ts 에서 옮겨옴) ----
-//
-// 3D 장면(render3d/predators.ts)이 곰치를 저폴리 튜브로 그리게 되면서 이 2D 스프라이트
-// 조립 규칙을 쓰는 곳은 실패 모달뿐이다(8번 과제 — 원래 장면과 실패 모달이 같은 그림을
-// 쓰게 하려고 별도 파일로 분리돼 있었는데, 장면 쪽이 3D 로 바뀌며 그 이유가 사라졌다).
-// 이제 남은 유일한 소비자 옆으로 그대로 옮겨온다.
-
-/** 스프라이트 원본 크기 (viewBox) — 배율 계산용 */
-const EEL_HEAD_W = 190;
-/** 회전 기준점(목덜미)이 스프라이트 안에서 놓인 자리 */
-const EEL_PIVOT_X = 10;
-const EEL_PIVOT_Y = 60;
-
-interface EelHeadPose {
-  /** 목덜미(회전 기준점)를 놓을 캔버스 좌표 */
-  x: number;
-  y: number;
-  /** 스프라이트 원본 대비 배율 */
-  scale: number;
-  /** 0 = 다문 입, 1 = 크게 벌린 입 */
-  open: number;
-}
-
-/**
- * 곰치 머리 한 개를 그린다.
- *
- * 아래턱을 먼저 그려야 위턱이 그 위를 덮어 경첩 이음매가 안 보인다.
- * 입을 벌릴 때 아래턱만 내리면 턱이 빠진 것처럼 보인다 — 위턱도 조금 젖혀야
- * 실제로 '벌어지는' 동작이 된다 (0.5 : 0.16 비율).
- */
-function drawEelHead(ctx: CanvasRenderingContext2D, pose: EelHeadPose): void {
-  const { x, y, scale, open } = pose;
-  ctx.save();
-  ctx.translate(x, y);
-  // 아래턱 경첩은 머리 기준점에서 입꼬리 쪽으로 (20, 10)
-  drawPart(ctx, 'eelJaw', {
-    x: 20 * scale,
-    y: 10 * scale,
-    scale,
-    rotation: open * 0.5,
-  });
-  drawPart(ctx, 'eelHead', { x: 0, y: 0, scale, rotation: -open * 0.16 });
-  ctx.restore();
-}
-
-/**
- * 실패 모달에 띄우는 곰치 그림.
- *
- * 아이콘을 따로 그리지 않는다. 실패 화면에 나오는 곰치가 방금 쫓아오던 그 곰치와
- * 다르게 생기면 "얘한테 잡혔구나"가 안 읽힌다.
- *
- * 스프라이트는 <img> 라 로드가 비동기다. 모달이 뜨는 순간 아직 안 왔을 수 있으므로
- * 준비될 때까지 짧게 다시 시도한다 (한 번 그리고 끝 — 애니메이션이 아니다).
- */
-function eelArt(): HTMLCanvasElement {
-  const W = 200;
-  const H = 150;
-  const canvas = el('canvas', { width: String(W), height: String(H) }) as HTMLCanvasElement;
-  canvas.style.width = `${W}px`;
-  canvas.style.height = `${H}px`;
-
-  const paint = (): void => {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    if (!spritesReady()) {
-      window.setTimeout(paint, 60);
-      return;
-    }
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    // 다문 입이면 그냥 물고기다. 잡아먹은 직후라 벌어져 있어야 한다.
-    const open = 0.7;
-    /**
-     * 배율은 **입을 벌린 상태의 전체 높이**로 정해야 한다.
-     * 머리 스프라이트 크기만 보고 맞추면 아래로 젖혀진 턱이 상자 밖으로 잘린다.
-     * 아래턱은 경첩(원본 10)에서 길이 140 만큼 뻗고, 벌린 각만큼 아래로 내려간다.
-     */
-    const jawDrop = 10 + 140 * Math.sin(open * 0.5) + 64;
-    const scale = Math.min((W - 24) / EEL_HEAD_W, (H - 12) / (EEL_PIVOT_Y + jawDrop));
-    // 가로는 머리 폭 기준으로 가운데 정렬
-    const headW = EEL_HEAD_W * scale;
-    drawEelHead(ctx, {
-      x: (W - headW) / 2 + EEL_PIVOT_X * scale,
-      y: 10 + EEL_PIVOT_Y * scale,
-      scale,
-      open,
-    });
-  };
-  preloadSprites();
-  paint();
-  return canvas;
-}
-
 export function openLoseModal(handlers: {
   /** 'eaten' 이면 시간 연장, 'moves' 면 이동 수 연장, 'deadBoard' 면 되살릴 방법이 없다 */
   reason: 'moves' | 'eaten' | 'deadBoard';
@@ -872,13 +776,9 @@ export function openLoseModal(handlers: {
       // 그림은 진 이유를 그대로 보여줘야 한다. 시간이 다 되면 포식자에게 잡힌 것이므로
       // 그 그림을 띄운다 (예전엔 산소통이었다 — 문구와 그림이 다른 말을 하고 있었다).
       //
-      // 문구(아래 lead)는 실제로 쫓아오던 생물(아귀/고블린상어/오징어)을 정확히
-      // 부르지만, 이 그림(eelArt — 이름은 그대로 남겨 뒀다, "실패 모달 전용 저폴리
-      // 턱 일러스트"라는 뜻으로 읽어달라)은 손으로 그린 곰치 아가리 하나뿐이다. 세
-      // 생물마다 같은 수준의 2D 일러스트를 새로 그리는 건 이번 작업(3D 포식자 에셋
-      // 교체) 범위 밖이라고 판단했다 — "잡혔다"는 감정(입 벌린 포식자)은 여전히
-      // 전달되지만, 어떤 종에게 잡혔는지는 이제 그림이 아니라 글자가 말한다.
-      if (isOxygen) body.append(el('div', { class: 'lose-art' }, eelArt()));
+      // 문구(아래 lead)와 그림(render/predatorArt.ts) 이 같은 생물을 가리켜야 한다 —
+      // 실제로 잡은 건 오징어인데 그림이 곰치면 "얘한테 잡혔구나"가 안 읽힌다.
+      if (isOxygen) body.append(el('div', { class: 'lose-art' }, predatorArt(handlers.predator)));
       const lead = isOxygen
         ? tf('oxygenOut', { predator: predatorLabel(handlers.predator) })
         : isDead

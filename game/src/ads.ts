@@ -11,7 +11,7 @@
 
 import { Verse8Ads } from '@verse8/ads';
 import { t, tf } from './i18n.ts';
-import { noteShown, type PlacementId } from './adPolicy.ts';
+import { noteShown, setAdsUnsupported, type PlacementId } from './adPolicy.ts';
 
 export type AdStatus = 'rewarded' | 'skipped' | 'failed';
 
@@ -27,7 +27,14 @@ let busy = false;
 
 function ensureInit(): void {
   if (initialized) return;
-  Verse8Ads.init({ debug: import.meta.env.DEV });
+  // onAdTelemetry 는 진단용이다. 실패 상태는 rewarded/skipped/failed 셋뿐이라
+  // "다 봤는데 보상이 없다" 는 신고가 들어와도 SDK 가 실제로 어디까지 갔는지가
+  // 안 보인다 -- ad_viewed 까지 왔는데 결과가 없으면 SDK·셸 쪽 문제고,
+  // ad_dismissed 만 왔으면 재생 중 닫힌 것이다. 콘솔에만 남기고 저장하지는 않는다.
+  Verse8Ads.init({
+    debug: import.meta.env.DEV,
+    onAdTelemetry: (e) => console.info('[ads]', e.type, e),
+  });
   initialized = true;
 }
 
@@ -102,7 +109,14 @@ export async function showRewarded(placementId: PlacementId): Promise<RewardedOu
   ensureInit();
 
   try {
-    const result = await Verse8Ads.showRewarded({ placementId, timeoutMs: 120_000 });
+    // 넉넉하게 잡는다. 이 값은 "이만큼 안에 안 끝나면 실패로 본다" 는 뜻이라, 짧으면
+    // 끝까지 본 사람이 회선이 느리거나 광고가 길다는 이유만으로 보상을 못 받는다.
+    // 길어져서 손해 보는 쪽은 없다 -- 사용자가 닫으면 dismissed 가 바로 오고,
+    // 기다리는 것은 이미 광고를 보고 있는 동안뿐이다.
+    const result = await Verse8Ads.showRewarded({ placementId, timeoutMs: 300_000 });
+    // 결과를 남긴다. 실패했을 때 화면은 "끝까지 안 봤다"로만 말하지만, 그것이
+    // dismissed 인지 failed(어떤 코드인지)인지에 따라 손댈 곳이 다르다.
+    console.info('[ads] result', result.status, result);
     switch (result.status) {
       case 'rewarded':
         noteShown(placementId);
@@ -114,6 +128,14 @@ export async function showRewarded(placementId: PlacementId): Promise<RewardedOu
           const status = await simulate();
           if (status === 'rewarded') noteShown(placementId);
           return { status };
+        }
+        // 로컬 개발 서버는 Verse8 호스트 밖이라 실물 SDK 가 거의 항상
+        // unsupported_env 를 돌려준다 -- 그때마다 세션을 잠그면 개발 중 반복
+        // 테스트가 첫 클릭 이후로 막힌다. 그래서 이 래치는 프로덕션 분기(위에서
+        // 이미 DEV 를 걸러낸 뒤)에서만 건다. 눌러도 반응 없는 버튼은 고장으로
+        // 읽히므로, 이후 canShow() 가 모든 지면을 닫는다 (adPolicy.ts).
+        if (result.error.code === 'unsupported_env') {
+          setAdsUnsupported();
         }
         return { status: 'failed' };
       }

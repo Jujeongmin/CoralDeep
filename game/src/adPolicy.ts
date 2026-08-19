@@ -67,6 +67,17 @@ export const PLACEMENTS: Record<PlacementId, PlacementDef> = {
   // 들르는 빈도가 줄고 메타 진행 자체가 죽는다.
 };
 
+// SDK 가 이 환경에서는 광고를 못 튼다(unsupported_env)고 답하면 세션 동안 래치한다
+// (ads.ts, 프로덕션에서만 건다). 되돌릴 방법이 없어서 지면마다 따로 잠그지 않고
+// canShow() 한 곳에서 전부 막는다 -- 안 그러면 열두 지면 버튼이 하나씩 눌러 봐야만
+// 죽은 걸 알 수 있는데, 그런 버튼은 고장으로 읽힌다.
+let unsupportedEnv = false;
+
+/** ads.ts 가 unsupported_env 를 받았을 때 부른다. 이후 이 세션에서는 모든 지면이 닫힌다. */
+export function setAdsUnsupported(): void {
+  unsupportedEnv = true;
+}
+
 function counterFor(id: string, now: number): { day: string; count: number; lastAt: number } {
   const save = getSave();
   const c = save.adCounters[id];
@@ -77,6 +88,7 @@ function counterFor(id: string, now: number): { day: string; count: number; last
 
 /** 이 지면을 지금 보여줄 수 있는가 */
 export function canShow(id: PlacementId, now: number = Date.now()): boolean {
+  if (unsupportedEnv) return false;
   const def = PLACEMENTS[id];
   const c = counterFor(id, now);
   if (c.count >= def.dailyCap) return false;
