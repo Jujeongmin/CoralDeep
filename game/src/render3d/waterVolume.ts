@@ -26,6 +26,13 @@
 // 있다) 바뀌면 아무 것도 안 깨진 채 광선만 다시 조용히 사라진다. depthTest: false 로
 // 그 결합을 아예 없앤다 -- 광선은 이제 seafloor.ts 의 어떤 z 상수와도 무관하게 항상
 // 보인다. 대신 draw 순서를 renderOrder 로 못박아 둔다(아래).
+//
+// 판 전체를 한 불투명도로 칠하면 빛이 아니라 네모난 막대로 보인다(사용자가 실제로
+// 그렇게 봤다). MeshBasicMaterial 은 판 전체가 균일하므로, patchShaft() 가 프래그먼트
+// 셰이더에 알파를 셰이핑하는 패치를 얹는다 -- 수면(판 위쪽)에서 넓고 밝고, 깊이
+// (판 아래쪽)로 갈수록 좁아지며 옅어지는 쐐기 모양과, 가장자리는 딱 끊기지 않고
+// 번지도록. 지오메트리는 그대로(판 하나, 재사용) -- seafloor.ts 의 코스틱 패치와
+// 같은 onBeforeCompile 방식이라 드로우콜·삼각형 수에 영향이 없다.
 
 import * as THREE from 'three';
 
@@ -33,6 +40,15 @@ import type { DepthMood } from '../render/depth.ts';
 import { depthScale, type HoleBox } from './seafloor.ts';
 
 const MAX_SHAFTS = 5;
+
+/** 시드 기반 0..1 난수 -- seafloor.ts 의 hash01() 과 같은 식이다. 판마다(리사이즈가
+ *  아니라 생성 시 한 번) 폭·길이·쐐기 정도를 갈라 다섯 판이 똑같아 보이지 않게
+ *  쓰는 용도라, 그 파일의 hash01 을 그대로 가져다 쓰기보다 이 파일 안에 작게
+ *  둔다 -- 광선판과 자갈은 서로 몰라도 되는 레이어다. */
+function hash01(n: number): number {
+  const s = Math.sin(n * 127.1) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 /**
  * 투명 오브젝트 사이 draw 순서 -- depthTest 를 꺼서 깊이 버퍼로는 순서를 안 정하므로,
@@ -50,6 +66,12 @@ export class WaterVolume {
   private geom = new THREE.PlaneGeometry(1, 1);
   private t = 0;
   private cap = 1;
+  /** 판마다 다른 폭·길이 배율 -- 다섯 판이 똑같은 크기로 안 보이게 한다. */
+  private widthMul: number[] = [];
+  private lenMul: number[] = [];
+  /** 셰이더에 넘기는 시간 -- 자갈밭의 uTime 과 같은 역할, 여기서는 쐐기 알파의
+   *  미세한 깜빡임(flicker)에만 쓴다. */
+  private uTime = { value: 0 };
 
   constructor(private scene: THREE.Scene) {
     for (let i = 0; i < MAX_SHAFTS; i++) {
@@ -62,6 +84,11 @@ export class WaterVolume {
         depthTest: false,
         side: THREE.DoubleSide,
       });
+      // 폭은 0.7~1.3배, 길이는 0.82~1.15배 -- 판마다 살짝 달라야 다섯 줄기가
+      // 한 틀로 찍어낸 막대처럼 안 보인다.
+      this.widthMul.push(0.7 + hash01(i * 17.3) * 0.6);
+      this.lenMul.push(0.82 + hash01(i * 29.9) * 0.33);
+      this.patchShaft(mat, i);
       const mesh = new THREE.Mesh(this.geom, mat);
       mesh.visible = false;
       mesh.renderOrder = RENDER_ORDER;
@@ -70,6 +97,64 @@ export class WaterVolume {
       this.group.add(mesh);
     }
     scene.add(this.group);
+  }
+
+  /**
+   * 판 전체를 한 알파로 칠하는 대신, 프래그먼트 알파를 자리에 따라 셰이핑해
+   * 쐐기(위는 넓고 밝고, 아래는 좁고 옅은) 모양을 만든다.
+   *
+   * vLocal 은 스케일 적용 전 로컬 정점 좌표(-0.5..0.5) 를 그대로 넘긴 varying 이다 --
+   * three 의 vUv 를 안 쓰는 이유는 MeshBasicMaterial 이 map 계열 텍스처가 하나도
+   * 없으면 USE_UV 가 꺼져 vUv 자체가 셰이더에 선언되지 않기 때문이다(position
+   * attribute 는 그런 조건 없이 항상 있다). seafloor.ts 의 patchCaustics() 가
+   * vWPos 를 직접 만든 것과 같은 이유, 같은 방식이다.
+   *
+   * PlaneGeometry 는 로컬 +y 가 위쪽이고, setMood() 는 이 판을 빈 띠 한가운데
+   * 놓고 세로로 꽉 채운다 -- 그래서 로컬 y=+0.5(v=1) 가 화면 위쪽(수면), y=-0.5
+   * (v=0) 가 화면 아래쪽(깊이)에 대응한다. 쐐기의 폭이 v=1 에서 가장 넓고 v=0
+   * 으로 갈수록 uTaper 까지 좁아지는 것도, 밝기가 v=1 근처에서 가장 세고 v=0
+   * 으로 갈수록 옅어지는 것도 이 대응 때문이다.
+   */
+  private patchShaft(mat: THREE.MeshBasicMaterial, i: number): void {
+    // 하단 쐐기 폭(전체 폭 대비 비율) -- 판마다 달라야 쐐기 정도도 균일하지 않다.
+    const uTaper = { value: 0.08 + hash01(i * 41.1) * 0.14 };
+    const uSeed = { value: i * 7 + 1 };
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.uTime;
+      shader.uniforms.uTaper = uTaper;
+      shader.uniforms.uSeed = uSeed;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vLocal;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocal = position.xy;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           varying vec2 vLocal;
+           uniform float uTime;
+           uniform float uTaper;
+           uniform float uSeed;`,
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           // v: 0(판 아래=깊이) .. 1(판 위=수면). u: 0(왼쪽) .. 1(오른쪽), 0.5 가 중심.
+           float v = clamp(vLocal.y + 0.5, 0.0, 1.0);
+           float u = vLocal.x + 0.5;
+           // 쐐기 -- 수면(v=1)에서는 판 폭 전체(0.5)까지, 깊이(v=0)로 갈수록
+           // uTaper 까지 좁아진다. pow(v, 0.55) 로 상단 근처에서 빨리 벌어지게 해
+           // "넓은 머리 + 가는 꼬리" 모양을 낸다.
+           float halfW = mix(uTaper, 0.5, pow(v, 0.55));
+           float edge = max(halfW * 0.6, 0.02);
+           float alphaH = 1.0 - smoothstep(halfW - edge, halfW, abs(u - 0.5));
+           // 세로 방향 -- 아래로 갈수록 옅어지고(빛이 안 닿는 데로 사라진다), 맨
+           // 위 가장자리도 살짝 죽여 판의 상단 경계가 딱 끊긴 선으로 안 보이게 한다.
+           float alphaV = smoothstep(0.0, 0.26, v) * (1.0 - 0.3 * smoothstep(0.88, 1.0, v));
+           // 잔물결 깜빡임 -- 정지한 그림이 아니라 흔들리는 물속 빛으로 읽히게 한다.
+           float flick = 0.85 + 0.15 * sin(uTime * 0.8 + uSeed * 1.7 + v * 3.0);
+           gl_FragColor.a *= clamp(alphaH, 0.0, 1.0) * alphaV * flick;`,
+        );
+    };
   }
 
   /**
@@ -92,11 +177,22 @@ export class WaterVolume {
       // 바닥판이 뒤에 있어 같은 방향으로 곱했다).
       const dk = depthScale(camZ, z);
       const x0 = clear.cx + (k - 0.5) * clear.w * 1.1;
-      const y0 = clear.cy;
+      // 판의 세로 길이는 alphaV 셰이핑으로 v=1(판 위쪽=수면)이 가장 밝다고 정했으니,
+      // 그 위쪽 끝이 실제로 밴드 위쪽 가장자리(수면)에 맞물려야 한다 -- 중앙 고정
+      // 이전 방식(y0 = clear.cy)은 판이 짧아질(lenMul < 1) 때 위아래 끝이 같이
+      // 안으로 줄어들어 광선이 수면에서 안 뻗어나오고 공중에 떠 보였다. 대신 위쪽
+      // 끝을 고정하고 길이만 lenMul 로 줄인다 -- 짧은 광선일수록 얕은 데서 끝난다.
+      const scaleY = clear.h * 0.9 * this.lenMul[i];
+      const topY0 = clear.cy + (clear.h * 0.9) / 2;
+      const y0 = topY0 - scaleY / 2;
       this.shafts[i].position.set(x0 * dk, y0 * dk, z);
       this.shafts[i].rotation.z = (k - 0.5) * 0.5;
-      this.shafts[i].scale.set(clear.w * 0.16 * dk, clear.h * 0.9 * dk, 1);
-      this.mats[i].opacity = 0.05 + mood.shafts * 0.1;
+      this.shafts[i].scale.set(clear.w * 0.16 * this.widthMul[i] * dk, scaleY * dk, 1);
+      // 쐐기 셰이핑(patchShaft) 은 중심을 가장 밝게, 가장자리를 옅게 그리므로 이전
+      // (판 전체 균일 알파) 대비 평균 밝기가 낮다 -- 같은 무게감을 유지하려 피크를
+      // 올린다(0.05~0.15 -> 0.08~0.28). 개수(n)로 이미 깊이별로 켜고 끄는 게
+      // 전부/전무를 담당하므로, 여기 배율은 "얼마나 밝게 보이는가"만 조정한다.
+      this.mats[i].opacity = 0.08 + mood.shafts * 0.2;
       this.mats[i].color.setRGB(
         mood.glowColor[0] / 255,
         mood.glowColor[1] / 255,
@@ -112,6 +208,7 @@ export class WaterVolume {
 
   step(dt: number): void {
     this.t += dt;
+    this.uTime.value += dt;
     // 광선은 흔들려야 물처럼 보인다. 주기가 어긋난 사인 둘 -- 하나면 시계추로 읽힌다.
     for (let i = 0; i < this.shafts.length; i++) {
       if (!this.shafts[i].visible) continue;
