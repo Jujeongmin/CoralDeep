@@ -58,24 +58,88 @@ function occupiesBoardCell(x: number, y: number, hole: HoleBox, mask: BoardMask)
 }
 
 /**
+ * 원 둘레를 8등분한 단위 벡터 + 중심(0,0) = 9 점. layout() 이 알의 구멍 침범을
+ * 판정할 때 알의 화면 투영 원(projectPebble() 의 결과)을 이 점들로 근사해서 쓴다.
+ *
+ * 예전엔 중심 + 상하좌우 4점(5점)이었다 — 큰 바위가 없던 시절엔 알이 몇 px 짜리
+ * 점이라 대각선 사이 빈틈(반지름의 약 29%, r*(1-cos45°))도 무시할 만한 오차였다.
+ * 지금은 알 크기 상한이 68px 로 커져서(SMALL/BIG_DIAM_MAX 참고) 그 대각선 빈틈이
+ * 수십 px 로 벌어질 수 있다 — 대각선 방향으로 큰 바위가 보드 칸에 삐져 들어가도
+ * 5점 판정은 못 잡는다. 8방향(대각선 4개 추가)으로 그 빈틈을 닫는다. layout() 은
+ * 리사이즈 때만 도는 저빈도 연산이라 후보당 4점을 더 검사해도 비용은 무시할 만하다.
+ */
+const CIRCLE_SAMPLE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [Math.SQRT1_2, Math.SQRT1_2],
+  [-Math.SQRT1_2, Math.SQRT1_2],
+  [Math.SQRT1_2, -Math.SQRT1_2],
+  [-Math.SQRT1_2, -Math.SQRT1_2],
+];
+
+/**
+ * 알(중심 proj.x, proj.y / 반지름 proj.r, 이미 projectPebble() 로 화면 투영된
+ * 값)이 보드 칸을 하나라도 침범하는가 — CIRCLE_SAMPLE_OFFSETS 의 9점으로
+ * 원판-폴리곤 교차를 근사한다.
+ */
+function pebbleOverlapsBoard(
+  proj: { x: number; y: number; r: number },
+  hole: HoleBox,
+  mask: BoardMask,
+): boolean {
+  for (const [dx, dy] of CIRCLE_SAMPLE_OFFSETS) {
+    if (occupiesBoardCell(proj.x + dx * proj.r, proj.y + dy * proj.r, hole, mask)) return true;
+  }
+  return false;
+}
+
+/**
  * 자갈 알 개수.
  *
- * 알 하나의 화면 투영 지름은 10~26px (아래 layout() 참고), 평균 넓이는
- * pi * mean((d/2)^2), d ~ Uniform[10,26] 로 계산하면 약 271px^2 이다.
- * 실측 결과(보드 밖 영역 약 95,000px^2 대비 알 520개, 밀도 520*271/95000 ≈ 1.48)에서
- * 커버리지가 40~55% 로 나왔다 — 겹침을 허용하는 무작위 배치의 이론적 기대치
- * (Boolean 모델, coverage = 1 - e^-density ≈ 77%) 보다 상당히 낮다. 다각체(정이십면체)
- * 를 무작위로 굴려 투영하면 외접원보다 실루엣이 작기 때문으로 보인다.
+ * 이전엔 알 하나의 화면 투영 지름이 10~26px 균등분포 하나뿐이었다 — 크기가 다
+ * 고만고만해서 알알이 다 비슷해 보이고, 그중 아무것도 시선을 안 붙잡는다는
+ * 피드백을 받았다. 지금은 두 갈래다: 대부분(1 - BIG_CHANCE)은 8~18px 잔자갈,
+ * 일부(BIG_CHANCE ≈ 10%)는 32~68px 큰 바위 — 실루엣을 깨는 닻 역할이다(아래
+ * layout() 참고). 큰 바위가 섞이며 알 하나의 평균 투영 넓이가 예전보다 커졌지만
+ * (대략 1.4~1.5배), 그렇다고 밀도가 과해지는 게 문제는 아니다 — 알 사이 틈은
+ * 바닥판(backing)이 항상 메우므로, 알의 밀도는 '틈이 안 보이는가'가 아니라
+ * '바닥이 알갱이·바위로 덮인 것처럼 보이는가'만 결정한다. 예전 실측(보드 밖
+ * 영역 약 95,000px^2 대비 알 520개)에서 이미 40~55% 커버리지가 나왔었고, 평균
+ * 넓이가 커진 지금은 그보다 더 빽빽하게 덮인다 — 부족해질 방향이 아니다.
  *
- * 이제 알 사이 틈은 바닥판(backing)이 메우므로 알만으로 100% 를 채울 필요는
- * 없다 — 알의 밀도는 '틈이 안 보이는가'가 아니라 '바닥이 알갱이로 덮인 것처럼
- * 보이는가'를 결정한다. Boolean 모델로 커버리지 90% 를 목표로 역산하면
- * density = -ln(0.1) ≈ 2.3, COUNT = 2.3 * 95000 / 271 ≈ 807 — 800으로 반올림한다.
- * (실측 효율이 이론보다 낮았던 만큼 실제 알만의 커버리지는 이보다 낮게 나올 수
- * 있지만, 바닥판이 있으므로 그래도 틈은 생기지 않는다.)
- * 800개 * 20 삼각형 = 16,000 삼각형 — 40k 예산에 여유를 남긴다.
+ * COUNT 를 실제로 묶는 건 커버리지가 아니라 삼각형 예산이다: 800개 * 20 삼각형
+ * (알 하나 = 저폴리 정이십면체 detail 0) = 16,000 삼각형, 40k 예산에 여유를
+ * 남긴다. 크기 분포를 바꿔도 삼각형 수는 그대로다 — 인스턴스 크기는 스케일일
+ * 뿐 지오메트리 복잡도가 아니다.
  */
 const COUNT = 800;
+
+/**
+ * 자갈 크기 분포 (화면 투영 지름, px 기준 — pxToWorld() 로 월드 단위로 바꿔 쓴다).
+ * BIG_CHANCE 확률로 큰 바위를, 나머지는 잔자갈을 굴린다 — 균일분포 하나로는
+ * 다 고만고만해 보인다는 게 문제였으므로 두 구간을 확실히 떨어뜨려 둔다.
+ */
+const SMALL_DIAM_MIN = 8;
+const SMALL_DIAM_MAX = 18;
+const BIG_DIAM_MIN = 32;
+const BIG_DIAM_MAX = 68;
+const BIG_CHANCE = 0.1;
+
+/**
+ * 클러스터 — 완전히 고른 무작위 산포는 '깔린 밭'이 아니라 '흩뿌린 점'으로
+ * 읽힌다는 게 두 번째 피드백이었다. 리사이즈마다 중심 몇 개를 미리 뽑아 두고,
+ * 알의 CLUSTER_BIAS 만큼을 그 중심 근처(CLUSTER_SPREAD 반경)에 몰아준다 —
+ * 나머지는 여전히 화면 전체에 고르게 뿌려 큰 빈틈은 안 남게 한다. 클러스터
+ * 중심이 우연히 보드 칸 안에 떨어져도 손해가 아니다 — 그 중심을 쓰려던 시도들만
+ * 버려지고(ATTEMPT_MULT 의 20배 여유가 이 정도는 가볍게 흡수한다), 나머지
+ * 클러스터·균일 풀이 COUNT 를 채운다.
+ */
+const CLUSTER_COUNT = 6;
+const CLUSTER_BIAS = 0.55;
+const CLUSTER_SPREAD = 0.22;
 
 /**
  * 구멍 판정 여유 대비 최대 시도 배수.
@@ -276,11 +340,41 @@ export class Seafloor {
     const spanX = view.worldW * 1.15;
     const spanY = view.worldH * 1.15;
 
+    // 클러스터 중심 — 리사이즈(=이 함수 호출)마다 seed 로 새로 뽑는다. 화면 전체
+    // span 안에서 고르게 뽑되(클러스터끼리도 뭉치지 않게), 실제로 몇 개가
+    // 쓰이는지는 CLUSTER_BIAS 확률로 알마다 갈린다.
+    const clusterX: number[] = [];
+    const clusterY: number[] = [];
+    for (let c = 0; c < CLUSTER_COUNT; c++) {
+      clusterX.push((hash01(seed + c * 31.7) - 0.5) * spanX);
+      clusterY.push((hash01(seed + c * 53.3) - 0.5) * spanY);
+    }
+
     let n = 0;
     for (let i = 0; i < COUNT * ATTEMPT_MULT && n < COUNT; i++) {
-      const x = (hash01(seed + i * 3.1) - 0.5) * spanX;
-      const y = (hash01(seed + i * 7.7) - 0.5) * spanY;
-      const r = pxToWorld(10 + hash01(seed + i * 1.3) * 16, view);
+      // 자리 — CLUSTER_BIAS 확률로 클러스터 중심 근처에, 나머지는 화면 전체에
+      // 고르게. 완전 균일 산포는 '깔린 밭'이 아니라 '흩뿌린 점'으로 보인다는
+      // 피드백이라, 뭉침을 만들되(시선이 갈 자리) 큰 빈틈은 안 남기려 균일 풀도
+      // 남겨 둔다.
+      let x: number;
+      let y: number;
+      if (hash01(seed + i * 15.1) < CLUSTER_BIAS) {
+        const c = Math.floor(hash01(seed + i * 17.9) * CLUSTER_COUNT) % CLUSTER_COUNT;
+        x = clusterX[c] + (hash01(seed + i * 19.3) - 0.5) * spanX * CLUSTER_SPREAD;
+        y = clusterY[c] + (hash01(seed + i * 21.7) - 0.5) * spanY * CLUSTER_SPREAD;
+      } else {
+        x = (hash01(seed + i * 3.1) - 0.5) * spanX;
+        y = (hash01(seed + i * 7.7) - 0.5) * spanY;
+      }
+
+      // 크기 — BIG_CHANCE 확률로 큰 바위, 나머지는 잔자갈(SMALL/BIG_DIAM_* 참고).
+      // 균일분포 하나로는 알알이 다 고만고만해 시선을 못 붙잡는다는 게 피드백이라
+      // 두 구간으로 확실히 갈랐다.
+      const big = hash01(seed + i * 11.3) < BIG_CHANCE;
+      const diamPx = big
+        ? BIG_DIAM_MIN + hash01(seed + i * 13.7) * (BIG_DIAM_MAX - BIG_DIAM_MIN)
+        : SMALL_DIAM_MIN + hash01(seed + i * 1.3) * (SMALL_DIAM_MAX - SMALL_DIAM_MIN);
+      const r = pxToWorld(diamPx, view);
       const z = -0.2 - hash01(seed + i * 5.5) * 1.4;
 
       // 보드 칸 위면 버린다. 보드는 사각형이 아니므로(계단·L자 등) 바운딩 박스가
@@ -289,24 +383,12 @@ export class Seafloor {
       // x, y, r 은 z=0 기준인데 알은 실제로 z(< 0, 카메라에서 더 멀다)에 놓인다.
       // projectPebble() 로 "이 알이 화면에 실제로 찍히는 자리·크기"를 구한 뒤
       // 그걸로 판정해야 한다 — z=0 기준 x, y, r 을 그대로 비교하면 알마다 깊이가
-      // 달라 침범량이 들쭉날쭉해진다(round 3 에서 실측한 버그).
-      //
-      // 중심 하나만 보면 알의 몸통(반지름 proj.r)이 중심 바깥의 옆 칸으로 삐져
-      // 나갈 수 있다 — 특히 보드 가장자리처럼 칸 경계가 알 반지름보다 촘촘한
-      // 자리에서 그렇다. 중심과 상하좌우 네 끝점(반지름만큼 떨어진 자리)까지
-      // 다섯 점을 봐서 그중 하나라도 보드 칸이면 버린다. 완벽한 원판-폴리곤
-      // 교차 판정은 아니지만(대각선 모서리를 살짝 놓칠 수 있다), 알이 화면에서
-      // 몇 px 짜리 점이고 저폴리 정이십면체라 실루엣도 원과 정확히 안 맞으므로
-      // 이 정도면 충분하다 — 남은 오차는 픽셀 단위지 round 3 처럼 몇 px 씩
-      // 체계적으로 삐져나오는 종류가 아니다.
+      // 달라 침범량이 들쭉날쭉해진다(round 3 에서 실측한 버그). proj.r 은 이
+      // 알(큰 바위 포함)의 실제 화면 반지름이므로, 아래 pebbleOverlapsBoard() 의
+      // 9점 판정도 알마다 자기 크기에 맞춰 침범 여부를 본다 — 큰 바위라고 별도
+      // 취급하지 않는다.
       const proj = projectPebble(x, y, r, z, camZ);
-      const onBoard =
-        occupiesBoardCell(proj.x, proj.y, hole, mask) ||
-        occupiesBoardCell(proj.x - proj.r, proj.y, hole, mask) ||
-        occupiesBoardCell(proj.x + proj.r, proj.y, hole, mask) ||
-        occupiesBoardCell(proj.x, proj.y - proj.r, hole, mask) ||
-        occupiesBoardCell(proj.x, proj.y + proj.r, hole, mask);
-      if (onBoard) continue;
+      if (pebbleOverlapsBoard(proj, hole, mask)) continue;
 
       pos.set(x, y, z);
       e.set(
@@ -324,8 +406,17 @@ export class Seafloor {
       // 편차가 크면(원래 0.34~0.54) 밝은 알이 타일만큼 눈에 띄어 버린다. setMood()
       // 의 k 가 depthMood(t) 로 전체 밝기를 낮추는 동안, 이 폭은 그 위에 얹히는
       // '알 사이 내부 대비'만 줄인다 -- 자갈 질감 자체는 남기고 산개비만 죽인다.
+      //
+      // v(밝기) 범위는 이전과 그대로다 — 어둡게 한 걸 되돌리지 않는다. 대신
+      // R/G 채널 비율(hue)을 알마다 살짝 흔든다(고정 0.62/0.78 을 축으로
+      // ±0.05 안팎) — '한 가지 색'으로 보인다는 피드백에 대한 답이다. rMul 이
+      // 오르면 gMul 은 내리도록 반대로 묶어서(hue, 1-hue) 밝기(v) 자체는 거의
+      // 안 흔들리게 했다 — 색조만 바뀌고 전체 밝기 예산은 그대로 지킨다.
       const v = 0.34 + hash01(seed + i * 9.9) * 0.12;
-      color.setRGB(v * 0.62, v * 0.78, v);
+      const hue = hash01(seed + i * 23.1);
+      const rMul = 0.58 + hue * 0.1;
+      const gMul = 0.74 + (1 - hue) * 0.08;
+      color.setRGB(v * rMul, v * gMul, v);
       this.mesh.setColorAt(n, color);
       n++;
     }
