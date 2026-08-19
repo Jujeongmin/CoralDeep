@@ -244,6 +244,21 @@ function bakeSkinnedFish(fileBase, outName) {
   }
   const { scale, deltaInt16 } = quantizeDeltaFrames(deltaFrames, vertCount);
 
+  // 원점(몸 중심) 기준 최대 정점 거리 — 모든 프레임(바인드 + 델타 적용)에 걸쳐 잰다.
+  // predators.ts/predators.test.ts 가 이 값을 "몸길이=1 기준 바운딩 반지름"으로
+  // 그대로 옮겨 적어(EEL_HEAD_REACH 가 하던 역할과 같다) danger=1 에서 보드 사각형을
+  // 안 넘는지 검증한다 — 애니메이션 중 가장 많이 뻗는 프레임까지 포함해야 안전하다.
+  let maxReachSq = 0;
+  for (let vi = 0; vi < vertCount; vi++) {
+    const bx = position[vi * 3], by = position[vi * 3 + 1], bz = position[vi * 3 + 2];
+    maxReachSq = Math.max(maxReachSq, bx * bx + by * by + bz * bz);
+    for (const delta of deltaFrames) {
+      const x = bx + delta[vi * 3], y = by + delta[vi * 3 + 1], z = bz + delta[vi * 3 + 2];
+      maxReachSq = Math.max(maxReachSq, x * x + y * y + z * z);
+    }
+  }
+  const maxReach = Math.sqrt(maxReachSq);
+
   // 루프 이음매 확인 - t=duration(다음 바퀴의 시작과 같아야 할 시점)을 따로 샘플링해
   // t=0 과 얼마나 벌어지는지 잰다. 정점 애니메이션 델타로는 안 굽는 값이고(프레임은
   // t=duration*(FRAME_COUNT-1)/FRAME_COUNT 까지만 굽는다 - 이 결과의 다음 프레임이
@@ -268,6 +283,7 @@ function bakeSkinnedFish(fileBase, outName) {
       `  델타 ${(animBytes / 1024).toFixed(1)}KB  축스케일 ${scale.map((s) => s.toExponential(3)).join(', ')}`,
   );
   console.log(`  루프 이음매(t=0 vs t=duration, 몸길이=1 기준 최대 정점 이동): ${seamMaxDelta.toFixed(4)}`);
+  console.log(`  원점 기준 최대 정점 거리(전 프레임, 몸길이=1 기준): ${maxReach.toFixed(4)}`);
 
   return { vertCount, triCount: index.length / 3, fileBytes: statSize(outPath), animBytes };
 }
@@ -339,10 +355,17 @@ function bakeSquid() {
 
   const normal = computeFlatNormals(position, index);
 
+  let maxReachSq = 0;
+  for (let i = 0; i < position.length; i += 3) {
+    maxReachSq = Math.max(maxReachSq, position[i] ** 2 + position[i + 1] ** 2 + position[i + 2] ** 2);
+  }
+  const maxReach = Math.sqrt(maxReachSq);
+
   const outPath = resolve(OUT_DIR, 'squid.glb');
   writeGlb(outPath, { position, normal, color, index, anim: null });
 
   console.log(`squid.glb  정점 ${vertCount}  삼각형 ${index.length / 3}  텍스처 ${tex.width}x${tex.height} -> 정점색`);
+  console.log(`  원점 기준 최대 정점 거리(몸길이=1 기준): ${maxReach.toFixed(4)}`);
 
   return { vertCount, triCount: index.length / 3, fileBytes: statSize(outPath) };
 }

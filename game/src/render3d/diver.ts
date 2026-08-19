@@ -22,6 +22,7 @@
 
 import * as THREE from 'three';
 
+import { sampleAnimFrame, unpackAnimFrames } from './bakedAnim.ts';
 import { depthScale, maxIdleBobWorld } from './depthProjection.ts';
 import { type GlbAnim, parseGlb } from './glb.ts';
 import { type PlaneView, pxToWorld, screenToPlane } from './projection.ts';
@@ -230,19 +231,10 @@ export class Diver {
    */
   private stepAnim(): void {
     if (!this.anim || !this.animFrames || !this.animOut || !this.geom) return;
-    const frameCount = this.anim.frameCount;
     // this.t 는 절대 감소하지 않으므로(step() 에서 매번 더하기만 한다) % 결과가
     // 항상 [0,1) 안에 든다 — 음수 보정이 필요 없다.
     const phase = (this.t / IDLE_ANIM_LOOP_SECONDS) % 1;
-    const scaled = phase * frameCount;
-    const i0 = Math.floor(scaled) % frameCount;
-    const i1 = (i0 + 1) % frameCount;
-    const frac = scaled - Math.floor(scaled);
-
-    const a = this.animFrames[i0];
-    const b = this.animFrames[i1];
-    const out = this.animOut;
-    for (let i = 0; i < out.length; i++) out[i] = a[i] + (b[i] - a[i]) * frac;
+    sampleAnimFrame(this.animFrames, phase, this.animOut);
     (this.geom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
   }
 
@@ -252,28 +244,4 @@ export class Diver {
     this.geom?.dispose();
     this.mat.dispose();
   }
-}
-
-/**
- * anim.deltas(Int16, 축마다 대칭 양자화)를 프레임별 Float32Array 로 풀어 둔다.
- * frames[0] 은 position 자체(복사본)고, frames[1..frameCount-1] 은
- * position + delta*scale 이다 — bake-diver-glb.mjs 가 쓰는 것과 같은 dequant 식.
- * step() 에서 매번 정수->실수 변환을 반복하지 않으려고 load() 때 한 번만 푼다.
- */
-function unpackAnimFrames(position: Float32Array, anim: GlbAnim): Float32Array[] {
-  const [sx, sy, sz] = anim.scale;
-  const vertexCount = position.length / 3;
-  const frames: Float32Array[] = [position.slice()];
-  for (let f = 1; f < anim.frameCount; f++) {
-    const frame = new Float32Array(position.length);
-    const base = (f - 1) * vertexCount * 3;
-    for (let vi = 0; vi < vertexCount; vi++) {
-      const o = vi * 3;
-      frame[o] = position[o] + anim.deltas[base + o] * sx;
-      frame[o + 1] = position[o + 1] + anim.deltas[base + o + 1] * sy;
-      frame[o + 2] = position[o + 2] + anim.deltas[base + o + 2] * sz;
-    }
-    frames.push(frame);
-  }
-  return frames;
 }

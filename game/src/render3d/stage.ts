@@ -112,6 +112,7 @@ export class Stage3D implements Stage {
 
     this.resize();
     void this.diver.load().catch((e) => console.warn('잠수부 로드 실패', e));
+    void this.predators.load().catch((e) => console.warn('포식자 로드 실패', e));
   }
 
   resize(): void {

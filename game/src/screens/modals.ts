@@ -2,7 +2,8 @@
 
 import { adButton, button, cn, el, iconButton, openModal, toast, watchRewarded } from '../ui.ts';
 import { amount, icon, type IconName } from '../icons.ts';
-import { LANGS, LANG_LABEL, formatDuration, t, tf } from '../i18n.ts';
+import { LANGS, LANG_LABEL, formatDuration, predatorLabel, t, tf } from '../i18n.ts';
+import { depthT, predatorFor, type PredatorKind } from '../levels.ts';
 import { getSave, mutateSave, type BoosterId } from '../storage.ts';
 import {
   BOOSTER_PRICE,
@@ -611,6 +612,9 @@ export function openPreBoostModal(
       const save = getSave();
 
       if (rescueOxygen > 0) {
+        // 레벨마다 실제로 쫓아오는 포식자가 다르다(levels.ts predatorFor) — 안내
+        // 문구가 그 이름을 그대로 불러야 "그 녀석이 온다"가 미리 읽힌다.
+        const predator = predatorFor(depthT(levelId));
         body.append(
           el(
             'div',
@@ -620,7 +624,7 @@ export function openPreBoostModal(
               'div',
               { class: 'rescue-brief-text' },
               el('strong', { text: t('rescueTitle') }),
-              el('small', { text: t('rescueDesc') }),
+              el('small', { text: tf('rescueDesc', { predator: predatorLabel(predator) }) }),
               el('span', { class: 'rescue-oxy' }, icon('oxygen', 16), `${t('oxygen')} ${rescueOxygen}`),
             ),
           ),
@@ -849,6 +853,10 @@ function eelArt(): HTMLCanvasElement {
 export function openLoseModal(handlers: {
   /** 'eaten' 이면 시간 연장, 'moves' 면 이동 수 연장, 'deadBoard' 면 되살릴 방법이 없다 */
   reason: 'moves' | 'eaten' | 'deadBoard';
+  /** 이 판에서 실제로 쫓아오던 포식자(levels.ts predatorFor) — oxygenOut 문구가 그
+   * 이름을 부른다. reason 이 'eaten' 이 아니면 안 쓰이지만, 호출부(level.ts)가
+   * 매번 levelId 로 다시 계산하지 않도록 항상 받아 둔다. */
+  predator: PredatorKind;
   onRevive: () => void;
   onRetry: () => void;
   onMap: () => void;
@@ -861,10 +869,21 @@ export function openLoseModal(handlers: {
       const isOxygen = handlers.reason === 'eaten';
       // 판이 막힌 거면 섞어도 짝이 안 나온다. 이동 수를 줘도 소용없으니 부활 지면을 안 띄운다.
       const isDead = handlers.reason === 'deadBoard';
-      // 그림은 진 이유를 그대로 보여줘야 한다. 시간이 다 되면 곰치에게 잡힌 것이므로
-      // 곰치를 띄운다 (예전엔 산소통이었다 — 문구와 그림이 다른 말을 하고 있었다).
+      // 그림은 진 이유를 그대로 보여줘야 한다. 시간이 다 되면 포식자에게 잡힌 것이므로
+      // 그 그림을 띄운다 (예전엔 산소통이었다 — 문구와 그림이 다른 말을 하고 있었다).
+      //
+      // 문구(아래 lead)는 실제로 쫓아오던 생물(아귀/고블린상어/오징어)을 정확히
+      // 부르지만, 이 그림(eelArt — 이름은 그대로 남겨 뒀다, "실패 모달 전용 저폴리
+      // 턱 일러스트"라는 뜻으로 읽어달라)은 손으로 그린 곰치 아가리 하나뿐이다. 세
+      // 생물마다 같은 수준의 2D 일러스트를 새로 그리는 건 이번 작업(3D 포식자 에셋
+      // 교체) 범위 밖이라고 판단했다 — "잡혔다"는 감정(입 벌린 포식자)은 여전히
+      // 전달되지만, 어떤 종에게 잡혔는지는 이제 그림이 아니라 글자가 말한다.
       if (isOxygen) body.append(el('div', { class: 'lose-art' }, eelArt()));
-      const lead = isOxygen ? t('oxygenOut') : isDead ? t('noMatchesLeft') : t('outOfMoves');
+      const lead = isOxygen
+        ? tf('oxygenOut', { predator: predatorLabel(handlers.predator) })
+        : isDead
+          ? t('noMatchesLeft')
+          : t('outOfMoves');
       body.append(el('p', { class: 'modal-lead', text: lead }));
       if (!isDead) {
         body.append(

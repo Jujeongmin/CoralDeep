@@ -4,6 +4,7 @@
 // 새 키를 넣을 때 네 곳에 같은 자리에 넣게 된다.
 // 빠진 키는 `t()` 가 KO 로 되돌아가므로 화면이 깨지지는 않는다.
 
+import type { PredatorKind } from './levels.ts';
 import { getSave, type SaveLang } from './storage.ts';
 
 export const LANGS = ['ko', 'en', 'ja', 'zh'] as const;
@@ -129,13 +130,20 @@ const KO: Dict = {
   goalNet: '어망',
   goalRescue: '구조',
 
+  // 레벨마다 실제로 다가오는 포식자가 다르다(levels.ts 의 predatorFor — 아귀·
+  // 고블린상어·오징어). rescueDesc/oxygenLow/oxygenOut 이 {predator} 로 이 이름을
+  // 끼워 넣는다 — i18n.ts 의 predatorLabel() 이 PredatorKind 를 이 키로 바꾼다.
+  predAnglerfish: '아귀',
+  predGoblinShark: '고블린상어',
+  predSquid: '대왕오징어',
+
   rescueTitle: '탈출',
   // 갇힌 건 연구원이 아니라 잠수부고, 케이지가 아니라 무너진 바위 틈이다.
-  // 제한도 산소가 아니라 다가오는 곰치다 — 화면에 나오는 것과 글이 맞아야 한다.
-  rescueDesc: '잠수부가 바위 틈에 갇혔다. 곰치가 닿기 전에 길을 뚫어라.',
+  // 제한도 산소가 아니라 다가오는 포식자다 — 화면에 나오는 것과 글이 맞아야 한다.
+  rescueDesc: '잠수부가 바위 틈에 갇혔다. {predator}가 닿기 전에 길을 뚫어라.',
   oxygen: '남은 시간',
-  oxygenLow: '곰치가 코앞이다!',
-  oxygenOut: '곰치에게 잡혔어요',
+  oxygenLow: '{predator}가 코앞이다!',
+  oxygenOut: '{predator}에게 잡혔어요',
   oxygenRefill: '시간 +{n}초',
   rescued: '잠수부 탈출 성공!',
   rescueBonus: '구조 보너스',
@@ -281,11 +289,15 @@ const EN: Dict = {
   goalNet: 'Net',
   goalRescue: 'Rescue',
 
+  predAnglerfish: 'anglerfish',
+  predGoblinShark: 'goblin shark',
+  predSquid: 'giant squid',
+
   rescueTitle: 'Escape',
-  rescueDesc: 'The diver is pinned in a rock crevice. Clear a path before the eel reaches him.',
+  rescueDesc: 'The diver is pinned in a rock crevice. Clear a path before the {predator} reaches him.',
   oxygen: 'Time',
-  oxygenLow: 'The eel is closing in!',
-  oxygenOut: 'The eel got you',
+  oxygenLow: 'The {predator} is closing in!',
+  oxygenOut: 'The {predator} got you',
   oxygenRefill: '+{n}s time',
   rescued: 'Diver escaped!',
   rescueBonus: 'Rescue bonus',
@@ -426,11 +438,15 @@ const JA: Dict = {
   goalNet: '網',
   goalRescue: '救助',
 
+  predAnglerfish: 'アンコウ',
+  predGoblinShark: 'ミツクリザメ',
+  predSquid: 'ダイオウイカ',
+
   rescueTitle: '脱出',
-  rescueDesc: 'ダイバーが岩の隙間に閉じ込められた。ウツボが届く前に道を開け。',
+  rescueDesc: 'ダイバーが岩の隙間に閉じ込められた。{predator}が届く前に道を開け。',
   oxygen: '残り時間',
-  oxygenLow: 'ウツボがすぐそこだ！',
-  oxygenOut: 'ウツボに捕まった',
+  oxygenLow: '{predator}がすぐそこだ！',
+  oxygenOut: '{predator}に捕まった',
   oxygenRefill: '時間 +{n}秒',
   rescued: 'ダイバー脱出成功！',
   rescueBonus: '救助ボーナス',
@@ -571,11 +587,15 @@ const ZH: Dict = {
   goalNet: '漁網',
   goalRescue: '救援',
 
+  predAnglerfish: '鮟鱇魚',
+  predGoblinShark: '哥布林鯊魚',
+  predSquid: '大王烏賊',
+
   rescueTitle: '逃脫',
-  rescueDesc: '潛水員被困在岩縫中。在鯙魚碰到他之前開出通路。',
+  rescueDesc: '潛水員被困在岩縫中。在{predator}碰到他之前開出通路。',
   oxygen: '剩餘時間',
-  oxygenLow: '鯙魚就在眼前！',
-  oxygenOut: '被鯙魚抓住了',
+  oxygenLow: '{predator}就在眼前！',
+  oxygenOut: '被{predator}抓住了',
   oxygenRefill: '時間 +{n} 秒',
   rescued: '潛水員成功脫困！',
   rescueBonus: '救援獎勵',
@@ -623,6 +643,18 @@ export function tf(key: string, vars: Record<string, string | number>): string {
   let out = t(key);
   for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, String(v));
   return out;
+}
+
+/** PredatorKind -> 그 생물의 현재 언어 이름(predAnglerfish 등). rescueDesc/oxygenLow/
+ * oxygenOut 의 {predator} 자리에 끼워 넣는다 — modals.ts 참고. */
+const PREDATOR_KEY: Record<PredatorKind, string> = {
+  anglerfish: 'predAnglerfish',
+  goblinShark: 'predGoblinShark',
+  squid: 'predSquid',
+};
+
+export function predatorLabel(kind: PredatorKind): string {
+  return t(PREDATOR_KEY[kind]);
 }
 
 /** ms 를 mm:ss 로 */

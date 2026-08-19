@@ -19,7 +19,13 @@ import type { LevelDef } from './core/types.ts';
 /** 레벨 목표에 따라 자동으로 골라지는 장면 종류. 지도의 레벨 배지에 쓴다. */
 export type SceneVariant = 'rescue' | 'ice' | 'rock' | 'net';
 
-export type PredatorKind = 'eel' | 'angler' | 'tentacle';
+/**
+ * 3D 장면(render3d/predators.ts)에 실제로 쓰는 심해생물 세 종 — Quaternius 저폴리
+ * 모델(CC0, poly.pizza)을 굽는다(README "포식자 3D 모델" 절 참고). 예전엔 손으로
+ * 만든 저폴리 도형에 eel/angler/tentacle 이라는 역할 이름을 붙였지만, 이제는 실제
+ * 생물이라 그 정체를 그대로 이름으로 쓴다.
+ */
+export type PredatorKind = 'anglerfish' | 'goblinShark' | 'squid';
 
 const ESCAPE = { type: 'escape', count: 0 } as const;
 
@@ -600,18 +606,20 @@ export function depthOf(id: number): number {
 /**
  * 수심대별 포식자 경계.
  *
- * 곰치 1~10 · 아귀 11~20 · 촉수 21~30 이 되도록 잡았다. `depthT` 는 (id-1)/29 이라
- * 경계가 반듯한 숫자로 안 떨어진다 — 21단계가 0.6897 이라 문턱을 0.7 로 두면 21이
- * 아귀 쪽에 남는다. 눈으로는 한 단계 차이라 놓치기 쉬워서 테스트로 고정해 둔다.
+ * 아귀 1~10 · 고블린상어 11~20 · 오징어 21~30 이 되도록 잡았다(예전 eel/angler/
+ * tentacle 역할과 같은 경계 — 생물만 실제 모델로 바뀌었다). `depthT` 는 (id-1)/29
+ * 이라 경계가 반듯한 숫자로 안 떨어진다 — 21단계가 0.6897 이라 문턱을 0.7 로 두면
+ * 21이 고블린상어 쪽에 남는다. 눈으로는 한 단계 차이라 놓치기 쉬워서 테스트로
+ * 고정해 둔다.
  */
-const ANGLER_FROM = 0.34;
-const TENTACLE_FROM = 0.68;
+const GOBLIN_SHARK_FROM = 0.34;
+const SQUID_FROM = 0.68;
 
 /** 수심 0..1 → 포식자 */
 export function predatorFor(depth: number): PredatorKind {
-  if (depth < ANGLER_FROM) return 'eel';
-  if (depth < TENTACLE_FROM) return 'angler';
-  return 'tentacle';
+  if (depth < GOBLIN_SHARK_FROM) return 'anglerfish';
+  if (depth < SQUID_FROM) return 'goblinShark';
+  return 'squid';
 }
 
 export function sceneVariantFor(level: LevelDef): SceneVariant {

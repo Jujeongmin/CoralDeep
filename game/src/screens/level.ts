@@ -6,7 +6,7 @@ import { t, tf } from '../i18n.ts';
 import { sfx, startAmbience, stopAmbience } from '../audio.ts';
 import { haptics } from '../haptics.ts';
 import { navigate, type NavParams } from '../router.ts';
-import { depthT, getLevel, levelReward } from '../levels.ts';
+import { depthT, getLevel, levelReward, predatorFor } from '../levels.ts';
 import { depthMood } from '../render/depth.ts';
 import { randomSeed } from '../core/rng.ts';
 import {
@@ -395,6 +395,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
 
     openLoseModal({
       reason,
+      predator: predatorFor(depthT(levelId)),
       extraMoves: REVIVE_MOVES,
       // 모달에 찍히는 값은 눈금이 아니라 **초**여야 한다
       extraOxygen: REVIVE_OXYGEN_SEC,
