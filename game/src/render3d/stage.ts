@@ -133,6 +133,28 @@ export class Stage3D implements Stage {
   }
 
   /**
+   * 빈 띠와 보드 사각형의 px 배치 -- clearBand() 와 잠수부 접지점 계산
+   * (standAnchorY()) 이 같이 쓴다. 보드를 아직 모르면(첫 프레임 한정) null.
+   */
+  private bandLayoutPx(): {
+    bandTop: number;
+    bandH: number;
+    /** 빈 띠가 보드 위쪽에 있는가 -- 그래야 "판자 위에 선다"는 방향이 중력과 맞다 */
+    aboveBoard: boolean;
+    boardTop: number;
+  } | null {
+    if (!this.board) return null;
+    const boardTop = this.board.y - this.top;
+    const boardBottom = boardTop + this.board.h;
+    const aboveH = Math.max(0, boardTop);
+    const belowH = Math.max(0, this.h - boardBottom);
+    const aboveBoard = aboveH >= belowH;
+    const bandTop = aboveBoard ? 0 : boardBottom;
+    const bandH = Math.max(aboveH, belowH);
+    return { bandTop, bandH, aboveBoard, boardTop };
+  }
+
+  /**
    * 보드 사각형 밖에서 가장 넓은 빈 띠 -- 광선은 여기에만 세운다.
    *
    * 보드가 화면 위쪽에 있으면 아래가, 아래쪽에 있으면 위가 넓다. 8번 과제가 보드를
@@ -140,18 +162,29 @@ export class Stage3D implements Stage {
    * 않는다. 보드 사각형을 아직 모르면(첫 프레임 한정) 화면 전체를 빈 띠로 본다.
    */
   private clearBand(): HoleBox {
-    if (!this.board) {
+    const layout = this.bandLayoutPx();
+    if (!layout) {
       const c = screenToPlane(this.w / 2, this.h / 2, this.w, this.h, this.view);
       return { cx: c.x, cy: c.y, w: this.view.worldW, h: this.view.worldH };
     }
-    const boardTop = this.board.y - this.top;
-    const boardBottom = boardTop + this.board.h;
-    const aboveH = Math.max(0, boardTop);
-    const belowH = Math.max(0, this.h - boardBottom);
-    const bandTop = aboveH >= belowH ? 0 : boardBottom;
-    const bandH = Math.max(aboveH, belowH);
-    const c = screenToPlane(this.w / 2, bandTop + bandH / 2, this.w, this.h, this.view);
-    return { cx: c.x, cy: c.y, w: this.view.worldW, h: pxToWorld(bandH, this.view) };
+    const c = screenToPlane(this.w / 2, layout.bandTop + layout.bandH / 2, this.w, this.h, this.view);
+    return { cx: c.x, cy: c.y, w: this.view.worldW, h: pxToWorld(layout.bandH, this.view) };
+  }
+
+  /**
+   * 잠수부가 접지할 화면 y(캔버스 로컬 px) -- 빈 띠가 보드 위쪽에 있을 때만 뜻이
+   * 통한다("판자 위에 선다"는 게 중력 방향과 맞아야 자연스럽다). 보드를 아직
+   * 모르거나(첫 프레임), 빈 띠가 보드 아래쪽에 있으면(미래에 보드가 위로 옮겨가는
+   * 경우) 보드 접지는 "천장에 붙어 선다"가 되어 부자연스러우므로, 그때는 예전처럼
+   * 빈 띠 가운데에 띄운다. 두 번째 반환값(grounded)이 접지 여부다 -- diver.ts
+   * place() 가 이 값으로 흔들림을 접지선 위로만 움직일지, 예전처럼 위아래로 고르게
+   * 움직일지 가른다.
+   */
+  private standAnchorY(): { y: number; grounded: boolean } {
+    const layout = this.bandLayoutPx();
+    if (layout?.aboveBoard) return { y: layout.boardTop, grounded: true };
+    const band = this.clearBand();
+    return { y: (0.5 - band.cy / this.view.worldH) * this.h, grounded: false };
   }
 
   setBoardRect(r: BoardRect): void {
@@ -184,21 +217,30 @@ export class Stage3D implements Stage {
       1 - (top / this.h) * 2,
     );
 
-    // 잠수부 제자리 -- 보드 밖 빈 띠의 가운데. 오늘은 보드가 위에 있어 띠가 아래지만,
-    // 8번 과제가 보드를 내리면 clearBand() 가 저절로 반대로 계산해 주므로 여기서
-    // 위/아래를 가정하지 않는다.
+    // 잠수부 제자리 -- 발을 보드 윗변(접지선)에 세운다. 가로는 그대로 빈 띠
+    // 가운데다. standAnchorY() 가 세로 접지점을 정한다 -- 오늘은 보드가 아래쪽에
+    // 있어 빈 띠가 위라 접지가 뜻이 통하지만, 8번 과제 이전처럼 보드가 위로
+    // 옮겨가 빈 띠가 아래가 되면(standAnchorY() 참고) 접지 대신 예전처럼 빈 띠
+    // 가운데로 저절로 되돌아간다 -- 여기서 위/아래를 가정하지 않는다.
     const band = this.clearBand();
+    const stand = this.standAnchorY();
     const anchor = {
       x: (band.cx / this.view.worldW + 0.5) * this.w,
-      y: (0.5 - band.cy / this.view.worldH) * this.h,
+      y: stand.y,
     };
     // 대기 크기가 빈 띠보다 크면 가만히 있어도 보드를 침범한다 -- 띠 높이(10% 여유)에
     // 맞춰 잠수부 기준 칸 크기를 줄인다. 대부분의 레이아웃에서는 r.cell 그대로 쓴다.
+    // 접지 상태에서도 이 90% 상한은 여전히 안전하다 -- 최악(클램프가 걸려
+    // cellPx*CELLS_TALL 이 정확히 bandHeightPx*0.9)에도, 몸 높이 + 접지 안전
+    // 여유(대략 몸 높이의 6.5%, diver.ts 의 standingTiltReachPx 호출부 참고)를
+    // 더한 값이 bandHeightPx*0.9*1.065 ≈ bandHeightPx*0.96 로 여전히 1 미만이라
+    // 흔들림에 쓸 여유가 항상 양수로 남는다(diver.ts 의 maxStandingBobWorld 가
+    // 이 여유를 Math.max(0, ...) 로 한 번 더 지키므로 음수가 되어도 0 으로 죈다).
     // bandHeightPx 는 place() 에 그대로 넘긴다 -- 흔들림(bob) 상한도 같은 빈 띠
     // 안에서 계산해야 하기 때문이다(diver.ts 참고).
     const bandHeightPx = band.h * this.view.pxPerWorld;
     const cellPx = Math.min(r.cell, (bandHeightPx * 0.9) / CELLS_TALL);
-    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z, bandHeightPx);
+    this.diver.place(anchor, this.view, this.w, this.h, cellPx, CAM_Z, bandHeightPx, stand.grounded);
   }
 
   setView(v: SceneView): void {

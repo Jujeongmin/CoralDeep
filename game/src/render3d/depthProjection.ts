@@ -126,3 +126,50 @@ export function maxIdleBobWorld(
   const marginPx = Math.max(0, halfMargin - rotationReach);
   return worldDeltaForScreen(camZ, z, marginPx, pxPerWorld);
 }
+
+/**
+ * 접지(발이 보드 위 접지선에 선) 상태의 잠수부가 기울 때(tilt, z 축 회전) 실루엣이
+ * 접지선 아래로 파고들 수 있는 최대 px 반경.
+ *
+ * 잠수부 모델의 원점(y=0)은 발이다(tools/bake-diver-glb.mjs 의 정규화 참고) —
+ * three.js Object3D 는 로컬 원점을 축으로 회전한 뒤 position 만큼 옮기므로, 발
+ * (로컬 원점)은 몸이 기울어도 제자리다(diver.ts place()/step() 참고). 다만 발
+ * 옆으로 뻗은 폭(widthRatio, 전신 높이 대비 가로 비) 때문에, 몸이 기울면 발 높이
+ * (y=0)에 있는 옆 지점(x=±width/2)이 살짝 접지선 아래로 내려간다 — 세로축 회전인
+ * 요(yaw)는 y 를 안 건드리므로 이 계산과 무관하다(diver.ts step() 의 결론과 같다).
+ *
+ * y' = x*sin(tilt) + y*cos(tilt) 를 y∈[0,1](발~정수리), x∈[-width/2,width/2],
+ * |tilt|<=tiltMaxRad 범위에서 최소화하면, cos(tilt)>0(tiltMaxRad 는 90도 근처에도
+ * 못 미친다) 이므로 y 항은 y=0 일 때가 가장 작고(더 낮출 수 없다 — 이미 0), x 항은
+ * x=∓width/2, tilt=±tiltMaxRad 일 때 가장 작다(가장 음수). 그래서 정수리 쪽
+ * heightPx 전체가 아니라 발 옆 폭만으로 정해진다 — 발보다 위에 있는 몸통·머리는
+ * 오히려 덜 위험하다(cos(tilt)≈1 이라 y 성분이 거의 그대로 양수로 남는다).
+ */
+export function standingTiltReachPx(
+  heightPx: number,
+  widthRatio: number,
+  tiltMaxRad: number,
+): number {
+  return heightPx * (widthRatio / 2) * Math.sin(tiltMaxRad);
+}
+
+/**
+ * 접지 상태에서, 위로만 뜨는 흔들림(bob)이 가질 수 있는 world 진폭 상한.
+ *
+ * maxIdleBobWorld() 는 빈 띠 가운데 배치를 가정해 위아래로 여유를 반씩 나눴다.
+ * 접지 상태는 발이 접지선에 그대로 붙어 있어(standingTiltReachPx() 참고) 아래로는
+ * 여유가 필요 없다 — reachPx 만큼만 접지선 위로 몸을 미리 세워 두면(diver.ts
+ * place() 가 적용) 최악의 기울기에도 안전하고, 남는 여유(bandHeightPx - heightPx -
+ * reachPx) 를 전부 위쪽 흔들림에 배정할 수 있다.
+ */
+export function maxStandingBobWorld(
+  heightPx: number,
+  bandHeightPx: number,
+  reachPx: number,
+  camZ: number,
+  z: number,
+  pxPerWorld: number,
+): number {
+  const marginPx = Math.max(0, bandHeightPx - heightPx - reachPx);
+  return worldDeltaForScreen(camZ, z, marginPx, pxPerWorld);
+}
