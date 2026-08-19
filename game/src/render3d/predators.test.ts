@@ -47,9 +47,9 @@ interface PredatorConfig {
 }
 
 const CONFIG: Record<PredatorKind, PredatorConfig> = {
-  anglerfish: { far: [4.5, 2.2, -3.0], near: [-0.3, 1.65, 1.85], bodyLength: 1.45, reach: 0.53 },
-  goblinShark: { far: [-5.0, 2.6, -3.2], near: [0.15, 1.85, 1.85], bodyLength: 1.7, reach: 0.56 },
-  squid: { far: [0.2, 5.8, -2.5], near: [0.1, 1.75, 1.9], bodyLength: 1.75, reach: 0.52 },
+  anglerfish: { far: [4.5, 2.2, -3.0], near: [1.35, 1.85, 1.65], bodyLength: 1.25, reach: 0.53 },
+  goblinShark: { far: [-5.0, 2.6, -3.2], near: [-1.5, 2.0, 1.7], bodyLength: 1.5, reach: 0.56 },
+  squid: { far: [0.2, 5.8, -2.5], near: [0.9, 2.9, 1.6], bodyLength: 1.2, reach: 0.52 },
 };
 
 /** projection.ts 의 planeView() 와 같은 식 — worldW 는 y 경계 계산에 안 쓰여 생략한다 */
@@ -62,7 +62,44 @@ const BOARD_TOP_PX = 246;
 /** 화면 sy=BOARD_TOP_PX 에 대응하는 z=0 평면 world y — 이보다 커야 빈 띠(보드 밖) 안이다 */
 const BOARD_TOP_WORLD_Y = (0.5 - BOARD_TOP_PX / CANVAS_H) * WORLD_H;
 
+/** predators.ts 의 FAR_SCALE — danger=0 에서 bodyLength 에 곱하는 배율 */
+const FAR_SCALE = 0.05;
+
 const KINDS: PredatorKind[] = ['anglerfish', 'goblinShark', 'squid'];
+
+// "danger 를 바꿔도 화면이 거의 안 변한다" 는 리뷰(코디네이터) 대응 — far(danger=0)
+// 와 near(danger=1) 의 화면상 지름이 실제로 크게 벌어지는지를 375x812 화면 기준
+// 수치로 못박아 둔다. 이 값이 좁아지면(리팩터 중 FAR_SCALE 을 실수로 키우는 등)
+// "다가옴"이 안 보이는 퇴행이므로, 여기서 비율 상한으로 잡아 둔다.
+{
+  const SCREEN_H = 812;
+  const PX_PER_WORLD = SCREEN_H / WORLD_H; // worldH 는 화면 크기와 무관 (FOV/camZ 만의 함수)
+
+  for (const kind of KINDS) {
+    test(`${kind}: danger=0 이 danger=1 대비 화면에서 뚜렷하게 작다(원근 무시하고 스케일만 비교해도)`, () => {
+      const cfg = CONFIG[kind];
+      const rNear = cfg.bodyLength * cfg.reach;
+      const rFar = rNear * FAR_SCALE;
+      const projNear = projectPebble(cfg.near[0], cfg.near[1], rNear, cfg.near[2], CAM_Z);
+      const projFar = projectPebble(cfg.far[0], cfg.far[1], rFar, cfg.far[2], CAM_Z);
+      const diameterNearPx = projNear.r * 2 * PX_PER_WORLD;
+      const diameterFarPx = projFar.r * 2 * PX_PER_WORLD;
+      // "작은 일부"의 기준 — near 의 15% 미만이면 눈에 띄게 다른 크기다(참고로 실측은
+      // 6~8% 수준, report 참고). 이 상한을 넘으면 danger=0 이 이미 danger=1 과 비슷해
+      // 보인다는 뜻이라 회귀로 본다.
+      assert.ok(
+        diameterFarPx < diameterNearPx * 0.15,
+        `${kind}: danger=0 지름(${diameterFarPx.toFixed(1)}px) 이 danger=1 지름` +
+          `(${diameterNearPx.toFixed(1)}px) 의 15% 이상이다 — 접근이 화면에서 잘 안 보일 만큼 좁다`,
+      );
+      // near 자체도 "위협적"이라 부를 만큼 커야 한다(너무 작아지면 반대 방향 회귀).
+      assert.ok(
+        diameterNearPx > 100,
+        `${kind}: danger=1 지름(${diameterNearPx.toFixed(1)}px)이 100px 도 안 된다 — 가까이 와도 안 위협적이다`,
+      );
+    });
+  }
+}
 
 for (const kind of KINDS) {
   const cfg = CONFIG[kind];

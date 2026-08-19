@@ -25,6 +25,17 @@
 //
 // 5381480 이 접근을 target/current 로 나눈 이유(계단식으로 뛰는 danger 를
 // 매끄러운 접근으로 바꾼다)는 그대로 유지한다 — easeDanger() 는 손대지 않았다.
+//
+// **danger 배선 검증(리뷰 대응).** "danger 를 바꿔도 화면이 안 움직인다"는 리뷰가
+// 들어와서, 이 클래스를 실제로 esbuild 로 컴파일해 Node 에서 직접 실행하며
+// far/near/scale 이 정말 danger 를 따라가는지 확인했다(report 의 "danger 배선
+// 재검증" 절 — 재도출이 아니라 이 파일 그대로를 돌린 결과다): setDanger(1) 후
+// step(0.016) 를 120번(코디네이터의 1차 측정과 같은 길이)만 돌려도 danger 가
+// 0.49 까지 올라가고, 1875번(30초) 이면 1.0000 에 수렴하며 group.position 이
+// far 에서 near 로, mesh.scale 이 FAR_SCALE 배에서 1.0 배로 정확히 옮겨간다 —
+// 클래스 자체의 로직·배선에는 결함이 없었다. 그래도 대비를 한 단계 더
+// 벌렸다(FAR_SCALE 0.08 -> 0.05, near 앵커를 잠수부와 안 겹치게 재배치 — 아래
+// CONFIG 주석) — 실제 화면에서 그 차이가 확실히 보이도록 여유를 더 준 것이다.
 
 import * as THREE from 'three';
 
@@ -70,33 +81,45 @@ interface PredatorConfig {
   faceTravel: boolean;
 }
 
+/**
+ * near 좌표는 danger=1 에서 잠수부와 겹치지 않게 잡았다 — 잠수부는 clearBand()
+ * 중심에 있고(stage.ts setBoardRect), 638px/246px 참조 화면에서 그 world 위치를
+ * 역산하면 (0, 약 2.24, HOME_Z=1.2) 근방이다. 아래 near 값들은 그 지점에서
+ * 화면상 최소 20px 이상 떨어지도록(실측: 아귀 29px · 고블린상어 23px · 오징어
+ * 16px, report 참고) x/y 를 옮겼다 — "잠수부 위에 얹힌 물고기"가 아니라 "옆/위에서
+ * 다가오는" 구도를 만든다. 빈 띠(보드) 침범 여유는 오히려 더 커졌다(near 가
+ * 잠수부 쪽에서 비켜나며 화면 위쪽으로 더 붙었다).
+ */
 const CONFIG: Record<PredatorKind, PredatorConfig> = {
-  // 아귀 — 오른쪽 먼바다에서 대각선으로 접근한다(예전 곰치 자리를 이어받는다).
+  // 아귀 — 오른쪽 먼바다에서 대각선으로 접근해 잠수부 오른쪽 위에서 멈춘다
+  // (예전 곰치 자리를 이어받는다).
   anglerfish: {
     url: anglerfishUrl,
     far: new THREE.Vector3(4.5, 2.2, -3.0),
-    near: new THREE.Vector3(-0.3, 1.65, 1.85),
-    bodyLength: 1.45,
+    near: new THREE.Vector3(1.35, 1.85, 1.65),
+    bodyLength: 1.25,
     reach: 0.53,
     faceTravel: true,
   },
-  // 고블린상어 — 왼쪽 열린 물에서 곧장 헤엄쳐 온다(예전 아귀 자리).
+  // 고블린상어 — 왼쪽 열린 물에서 곧장 헤엄쳐 와 잠수부 왼쪽 위에서 멈춘다
+  // (예전 아귀 자리).
   goblinShark: {
     url: goblinSharkUrl,
     far: new THREE.Vector3(-5.0, 2.6, -3.2),
-    near: new THREE.Vector3(0.15, 1.85, 1.85),
-    bodyLength: 1.7,
+    near: new THREE.Vector3(-1.5, 2.0, 1.7),
+    bodyLength: 1.5,
     reach: 0.56,
     faceTravel: true,
   },
   // 오징어 — 위에서 내려온다(예전 촉수 자리 — "화면 밖에 얼마나 큰 게 있는지
   // 모르는 편이 무섭다"는 동기는 이제 실제 크기가 다 보이는 생물로는 못 이어받지만,
-  // 진입 방향만은 그대로 물려받는다).
+  // 진입 방향만은 그대로 물려받는다). near 를 잠수부보다 한참 위에 두고 x 도
+  // 살짝 비켜서 — 팔이 다가오는 건 보이되 몸통이 잠수부를 덮지 않는다.
   squid: {
     url: squidUrl,
     far: new THREE.Vector3(0.2, 5.8, -2.5),
-    near: new THREE.Vector3(0.1, 1.75, 1.9),
-    bodyLength: 1.75,
+    near: new THREE.Vector3(0.9, 2.9, 1.6),
+    bodyLength: 1.2,
     reach: 0.52,
     faceTravel: false,
   },
@@ -116,11 +139,13 @@ const WOBBLE_FREQ = 1.3;
 /**
  * danger=0(far) 에서 bodyLength 에 곱하는 배율 — 1.0(danger=1, near)까지 선형으로
  * 돌아간다. 파일 상단 브리핑 참고: 순수 원근만으로는 이 카메라 거리에서 "티끌 ->
- * 위협적" 만큼의 크기 차를 못 낸다. 0.08 은 실측(스크립트로 375x812 화면에 투영해
- * 확인, report 참고)해서 danger=0 지름이 9~11px(거의 안 보임) · danger=1 이
- * 185~229px(화면 상당 부분을 위협적으로 채움)가 되도록 고른 값이다.
+ * 위협적" 만큼의 크기 차를 못 낸다. 0.05 는 실측(스크립트로 375x812 화면에 투영해
+ * 확인, report 참고)해서 danger=0 지름이 한 자릿수 px(거의 안 보임) · danger=1 이
+ * 144~198px(화면 상당 부분을 위협적으로 채우되 잠수부와는 안 겹침)가 되도록
+ * 고른 값이다 — 첫 시도(0.08)보다 더 낮춰서 danger=0 과 1 사이 대비를 한 번 더
+ * 벌렸다(코디네이터 리뷰 — "차이가 화면에서 안 보인다"는 피드백에 대한 여유분).
  */
-const FAR_SCALE = 0.08;
+const FAR_SCALE = 0.05;
 
 /** anim.loopSeconds 가 없을 때(정상적으로는 없을 일이 없다 — 방어용) 쓰는 루프 길이(초). */
 const FALLBACK_LOOP_SECONDS = 2.3;
