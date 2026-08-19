@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { computeFlatNormals, quantizeDeltaFrames } from './lib/bakeAnim.mjs';
 import { meshesOf, parseFbx } from './lib/fbx.mjs';
 import { writeGlb } from './lib/glbWrite.mjs';
 import {
@@ -164,46 +165,11 @@ function applyNormalize(position, params) {
   }
 }
 
-/**
- * 면 법선을 정점에 누적한 뒤 정규화한다. 프레임 0(포즈가 정해진 기준 자세)에서만
- * 계산해 전 프레임이 공유한다 - 다른 이유가 아니라 예산과 판단의 문제다: Idle 은
- * 가슴이 살짝 오르내리고 팔이 조금 흔들리는 정도라(정점 이동 범위 실측 0.03,
- * 전신 높이 1 기준) 그림자 경계가 눈에 띄게 어긋날 만큼 크지 않다. 프레임마다
- * 법선까지 다시 구우면 저장 용량이 두 배가 되는데, 이 정도로 미묘한 Idle 에는
- * 안 맞는 값이라고 판단했다. 런타임이 flatShading 을 쓰므로 정밀할 필요도 없다.
- */
-function computeNormals(position, index) {
-  const normal = new Float32Array(position.length);
-  for (let i = 0; i < index.length; i += 3) {
-    const a = index[i] * 3;
-    const b = index[i + 1] * 3;
-    const c = index[i + 2] * 3;
-    const ux = position[b] - position[a];
-    const uy = position[b + 1] - position[a + 1];
-    const uz = position[b + 2] - position[a + 2];
-    const vx = position[c] - position[a];
-    const vy = position[c + 1] - position[a + 1];
-    const vz = position[c + 2] - position[a + 2];
-    const nx = uy * vz - uz * vy;
-    const ny = uz * vx - ux * vz;
-    const nz = ux * vy - uy * vx;
-    for (const o of [a, b, c]) {
-      normal[o] += nx;
-      normal[o + 1] += ny;
-      normal[o + 2] += nz;
-    }
-  }
-  for (let i = 0; i < normal.length; i += 3) {
-    const l = Math.hypot(normal[i], normal[i + 1], normal[i + 2]) || 1;
-    normal[i] /= l;
-    normal[i + 1] /= l;
-    normal[i + 2] /= l;
-  }
-  return normal;
-}
-
-// glb 작성은 tools/lib/glbWrite.mjs 로 옮겼다 — bake-predators-glb.mjs 도 같은
-// 형식을 굽게 되면서 두 도구가 각자 파일 쓰기 코드를 들면 형식이 슬쩍 갈라지기
+// 법선 계산(프레임 0 만, 전 프레임이 공유)과 델타 양자화는 tools/lib/bakeAnim.mjs
+// 로 옮겼다 — bake-predators-glb.mjs 도 같은 방식을 그대로 재사용한다(Idle 은
+// 가슴이 살짝 오르내리는 정도라 법선을 프레임마다 다시 구울 만큼 크게 안 바뀐다는
+// 판단은 여전히 유효하다 - bakeAnim.mjs 주석 참고). glb 작성도 tools/lib/glbWrite.mjs
+// 로 옮겼다 — 두 굽기 도구가 각자 파일 쓰기 코드를 들면 형식이 슬쩍 갈라지기
 // 쉬워서다. extras 필드 이름도 diverAnim 이 아니라 bakedAnim 이다(glbWrite.mjs
 // 주석 참고) — glb.ts 가 그 이름으로 읽는다.
 
@@ -215,7 +181,7 @@ const frame0Raw = mergedPositionAt(0);
 const normParams = computeNormalizeParams(frame0Raw);
 applyNormalize(frame0Raw, normParams);
 const position = frame0Raw;
-const normal = computeNormals(position, index);
+const normal = computeFlatNormals(position, index);
 
 const vertCount = position.length / 3;
 const deltaFrames = [];
@@ -228,28 +194,7 @@ for (let i = 1; i < FRAME_COUNT; i++) {
   deltaFrames.push(delta);
 }
 
-// 축마다 대칭 양자화 스케일: 그 축에서 관측된 최대 절댓값 / 32767.
-const scale = [0, 0, 0];
-for (const delta of deltaFrames) {
-  for (let i = 0; i < delta.length; i += 3) {
-    scale[0] = Math.max(scale[0], Math.abs(delta[i]));
-    scale[1] = Math.max(scale[1], Math.abs(delta[i + 1]));
-    scale[2] = Math.max(scale[2], Math.abs(delta[i + 2]));
-  }
-}
-for (let a = 0; a < 3; a++) scale[a] = scale[a] / 32767 || 1; // 그 축이 아예 안 움직이면 0/0 방지용 1
-
-const deltaInt16 = new Int16Array(deltaFrames.length * vertCount * 3);
-{
-  let w = 0;
-  for (const delta of deltaFrames) {
-    for (let i = 0; i < delta.length; i += 3) {
-      deltaInt16[w++] = Math.round(delta[i] / scale[0]);
-      deltaInt16[w++] = Math.round(delta[i + 1] / scale[1]);
-      deltaInt16[w++] = Math.round(delta[i + 2] / scale[2]);
-    }
-  }
-}
+const { scale, deltaInt16 } = quantizeDeltaFrames(deltaFrames, vertCount);
 
 // 실루엣이 프레임 사이에서 얼마나 움직이는지(정규화 모델 좌표, 전신 높이가 1) -
 // 검증할 때 화면 px 로 환산하는 데 쓴다.
