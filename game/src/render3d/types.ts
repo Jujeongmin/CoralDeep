@@ -49,6 +49,21 @@ export interface SceneView {
 }
 
 export interface Stage {
+  /**
+   * 무대가 실제로 다 갖춰졌는가 -- three.js 모듈을 불러오고 Stage3D 를 생성하는
+   * 것과는 다른 시점이다. 생성자는 동기라 바로 끝나지만, 잠수부(diver.glb)와
+   * 포식자(anglerfish/goblinShark/squid.glb) 는 생성자 안에서 fetch 를 걸어 두고
+   * await 하지 않는다 -- 그래야 무대 자체는 즉시 화면에 떠서(자갈·조명·광선판)
+   * 텅 빈 채로 몇 초씩 기다리지 않는다. 하지만 그 fetch 들이 끝나기 전에 게임을
+   * 시작하면 잠수부·포식자가 화면에 "툭" 나타나는 게 보인다 -- 호출부
+   * (screens/level.ts) 가 이 프로미스를 기다렸다가 게임을 시작하려면 로드가
+   * 실제로 끝나는 시점이 필요하다.
+   *
+   * fetch 가 실패해도(네트워크 등) 이 프로미스는 거부(reject)하지 않는다 -- 각
+   * 로더(diver.ts/predators.ts)가 자기 실패를 안에서 삼키고 콘솔 경고만 남기기
+   * 때문이다(정지 포즈로 대체). 호출부가 .catch 를 따로 안 달아도 안전하다.
+   */
+  ready(): Promise<void>;
   /** 상태 갱신. 렌더 루프는 BoardView 가 돌린다 */
   step(dt: number): void;
   render(): void;

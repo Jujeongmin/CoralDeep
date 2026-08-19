@@ -77,7 +77,12 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     preBoosters: (params.preBoosters ?? []) as PreBooster[],
   });
 
-  let busy = false;
+  // busy 는 원래 "한 수 재생 중"만 뜻했다 -- 여기서는 시작값을 true 로 잡아 그
+  // 의미를 하나 더 얹는다: "아직 입력을 받을 준비가 안 됐다". onBoosterClick /
+  // handleSwap / handlePick 이 전부 이 값을 이미 확인하므로(아래), 3D 로드가
+  // 끝나 startGame() 이 false 로 풀 때까지 부스터·스왑·타겟 선택이 전부 막힌다 --
+  // 새 게이트를 하나 더 만드는 대신 기존 잠금을 그대로 넓혀 쓴다.
+  let busy = true;
   let finished = false;
   let targetBooster: InGameBooster | null = null;
   let idleTimer = 0;
@@ -89,7 +94,18 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   const scoreValue = el('span', { class: 'score-value', text: '0' });
   const canvas = el('canvas', { class: 'board-canvas' }) as HTMLCanvasElement;
   const stageCanvas = el('canvas', { class: 'stage3d' }) as HTMLCanvasElement;
-  const boosterBar = el('div', { class: 'booster-bar' });
+  // 3D 가 다 갖춰질 때까지 보드 위를 덮는 안내 -- 스피너는 광고 오버레이의
+  // .ad-spinner 를 그대로 재사용한다(같은 시각 언어, 새 로딩 스타일을 또 만들지
+  // 않는다). z-index 는 style.css 의 .level-loading 이 stage3d(2) 보다 위(3)로 잡는다.
+  const stageLoading = el(
+    'div',
+    { class: 'level-loading' },
+    el('div', { class: 'ad-spinner' }),
+    el('p', { text: t('stageLoading') }),
+  );
+  // 부스터 바도 로딩 중엔 흐리게 죽여 둔다 -- busy=true 가 클릭을 이미 막지만,
+  // 눌러도 반응이 없는 멀쩡해 보이는 버튼은 "고장났다"로 읽힌다.
+  const boosterBar = el('div', { class: 'booster-bar loading-disabled' });
   const targetHint = el('p', { class: 'target-hint', text: t('tapTarget') });
   targetHint.style.display = 'none';
 
@@ -116,7 +132,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     ),
   );
 
-  const screenEl = el('main', { class: 'screen level-screen' }, canvas, stageCanvas);
+  const screenEl = el('main', { class: 'screen level-screen' }, canvas, stageCanvas, stageLoading);
   host.append(header, goalRow, screenEl, targetHint, boosterBar);
 
   // 배경은 3D 가 아니라 CSS 다 — 3D 가 맨 앞 레이어라 배경 메시를 두면 보드를 덮는다.
@@ -128,33 +144,88 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   renderGoals();
   renderBoosters();
 
+  // BoardView 생성자는 동기적으로 resize() 를 한 번 돌린다(그 안에서
+  // setBoardRect() 도 호출된다) -- 잠수부 배치·자갈 해저의 칸 마스크 구멍·입자
+  // 억제 사각형이 전부 "보드 사각형을 안다"는 전제로 첫 프레임부터 맞물려야
+  // 하므로, 이 순서(생성자 -> resize() -> setBoardRect())는 이 과제에서도 그대로
+  // 지킨다 -- 아래에서 하는 일은 입력 게이트와 로딩 표시뿐이고 BoardView 생성
+  // 자체는 손대지 않는다.
   const view = new BoardView(canvas, state.board, {
     onSwapRequest: (a, b) => void handleSwap(a, b),
     onPickCell: (i) => void handlePick(i),
   });
+  // 위 busy=true 와 짝을 이룬다 -- 캔버스 포인터 입력 자체도 여기서 막는다.
+  view.setLocked(true);
 
-  // 3D 는 나중에 붙는다. 그때까지 보드는 이미 놀고 있어야 한다.
+  // ---- 3D 로드 대기 ----
+  //
+  // 예전엔 3D 가 나중에 조용히 붙었다(보드가 먼저 놀고, 잠수부가 몇 순간 뒤에
+  // "툭" 나타났다). 이제는 게임 자체가 3D 가 다 갖춰질 때까지 기다린다 -- 위
+  // busy=true / view.setLocked(true) 가 입력을 막아 두고, startGame() 이 그 잠금을
+  // 풀며 게임을 실제로 시작한다.
   //
   // three 는 여기서 처음 내려받는다 -- 지도·수족관 화면은 이 코드를 안 거치므로
-  // 앱을 켜자마자 받을 이유가 없다(render3d/index.ts 참고). WebGL 을 못 따거나
-  // 로드 도중 뭔가 터지면 createStage() 가 null 을 주고, 그때는 캔버스를 감춰
-  // CSS 그라디언트 배경만 남긴다 -- 보드는 이미 위에서 만들어졌으니 그대로 논다.
+  // 앱을 켜자마자 받을 이유가 없다(render3d/index.ts 참고). createStage() 가
+  // resolve 되는 시점은 "three 모듈을 불러오고 Stage3D 를 생성했다"까지일 뿐이고,
+  // 잠수부(diver.glb, ~685KB)·포식자 glb 는 그 생성자 안에서 fetch 만 걸어 두고
+  // 기다리지 않는다(stage.ts 참고) -- 그래서 "진짜 다 됐다"는 stage.ready() 를
+  // 한 번 더 기다려야 안다. WebGL 을 못 따거나 import 가 실패하면 createStage() 가
+  // 그 자리에서 바로 null 을 주므로(webglAvailable() 판정은 동기, import 실패도
+  // catch 에서 즉시 반환) 그 경로는 원래도 빠르다 -- 느려질 수 있는 건 오직 glb
+  // fetch 뿐이다.
   let stage: Stage | null = null;
   let destroyed = false;
-  void createStage(stageCanvas, depthT(level.id)).then((s) => {
-    // screen:destroy 가 로드 도중 먼저 왔으면(레벨을 빨리 나간 경우) 화면에 붙이지
-    // 않고 바로 해제한다 -- 안 그러면 이미 사라진 화면에 렌더러가 남는다.
-    if (destroyed) {
-      s?.dispose();
-      return;
-    }
-    if (!s) {
-      stageCanvas.style.display = 'none';
-      return;
-    }
-    stage = s;
-    view.setStage(s);
-  });
+  let started = false;
+
+  /**
+   * 느린 회선에서도 3D 가 뜰 시간은 주되, 무한정 기다리며 "멈춘 게임"으로 보이면
+   * 안 된다 -- createStage() 가 null 을 주는 이유(웹뷰가 WebGL 을 못 딴다) 자체가
+   * "3D 없이도 보드는 논다"는 사고 대응이었는데, 로딩 대기가 그 취지를 무너뜨리면
+   * 안 된다. diver.glb(685KB) + 포식자 glb 한 개(비슷한 자릿수)를 3G 급 회선
+   * (~750kbps 안팎) 에서 받아도 수 초면 끝난다 -- 8초는 정상적인 4G/Wi-Fi 에서는
+   * 절대 안 걸리는 여유고, 진짜로 막힌 상황(오프라인 전환 등)에서는 8초 안에
+   * 포기하고 보드만으로 시작한다. 그래도 3D 가 뒤늦게 도착하면(아래 .then) 그때
+   * 조용히 붙는다 -- 타임아웃은 "포기"가 아니라 "기다림을 그만둔다"는 뜻이다.
+   */
+  const STAGE_LOAD_TIMEOUT_MS = 8000;
+
+  function startGame(): void {
+    if (started || destroyed) return;
+    started = true;
+    window.clearTimeout(timeoutId);
+    stageLoading.remove();
+    boosterBar.classList.remove('loading-disabled');
+    busy = false;
+    view.setLocked(false);
+    resetIdle();
+    startTimer();
+  }
+
+  const timeoutId = window.setTimeout(startGame, STAGE_LOAD_TIMEOUT_MS);
+
+  void createStage(stageCanvas, depthT(level.id))
+    .then(async (s) => {
+      if (!s) return null;
+      // stage.ready() 는 절대 거부(reject)하지 않는다(각 로더가 자기 실패를
+      // 안에서 삼킨다 -- render3d/types.ts 의 Stage.ready() 주석 참고).
+      await s.ready();
+      return s;
+    })
+    .then((s) => {
+      // screen:destroy 가 로드 도중 먼저 왔으면(레벨을 빨리 나간 경우) 화면에 붙이지
+      // 않고 바로 해제한다 -- 안 그러면 이미 사라진 화면에 렌더러가 남는다.
+      if (destroyed) {
+        s?.dispose();
+        return;
+      }
+      if (!s) {
+        stageCanvas.style.display = 'none';
+      } else {
+        stage = s;
+        view.setStage(s);
+      }
+      startGame();
+    });
 
   // ---- 갱신 ----
 
@@ -430,7 +501,9 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   }
 
   refreshHud();
-  resetIdle();
+  // resetIdle() 은 여기서 안 부른다 -- startGame() 이 부른다. 로딩 중에 힌트가
+  // 깜빡이면 "만질 수 있다"는 신호를 주는데 실제로는 busy=true 로 막혀 있어
+  // 어긋난다.
 
   // 개발 환경 전용 디버그 훅 (프로덕션 번들에서는 통째로 제거된다)
   if (import.meta.env.DEV) {
@@ -459,46 +532,55 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   // 쫓기는 느낌이 없었다. 지금은 실제 시간으로 곰치가 다가온다.
   //
   // 눈금 하나 = SEC_PER_UNIT 초 (모듈 상단). 레벨 데이터의 oxygen 값이 그대로 눈금 수다.
+  //
+  // 인터벌은 여기서 바로 안 켠다 -- startGame() 이 부른다(startTimer()). 로딩
+  // 대기 중에도 켜 두면 3D 를 기다리는 몇 초 동안 산소가 소리 없이 새는 꼴이라
+  // (구조 미션이면 실제로 불리해진다), 게임이 아직 안 시작한 시간까지 제한
+  // 시간에 넣으면 안 된다.
   let drained = 0;
-  let lastTick = performance.now();
+  let lastTick = 0;
   let growled = false;
+  let timer = 0;
 
-  const timer = window.setInterval(() => {
-    if (finished || state.status !== 'playing') return;
-    // 모달(부스터·광고)이 떠 있는 동안은 멈춘다 — 광고 보다가 잡아먹히면 안 된다
-    if (document.querySelector('.modal-backdrop')) {
-      lastTick = performance.now();
-      return;
-    }
-    const now = performance.now();
-    const dt = Math.min(1, (now - lastTick) / 1000);
-    lastTick = now;
+  function startTimer(): void {
+    lastTick = performance.now();
+    timer = window.setInterval(() => {
+      if (finished || state.status !== 'playing') return;
+      // 모달(부스터·광고)이 떠 있는 동안은 멈춘다 — 광고 보다가 잡아먹히면 안 된다
+      if (document.querySelector('.modal-backdrop')) {
+        lastTick = performance.now();
+        return;
+      }
+      const now = performance.now();
+      const dt = Math.min(1, (now - lastTick) / 1000);
+      lastTick = now;
 
-    drained += dt / SEC_PER_UNIT;
-    const whole = Math.floor(drained);
-    let status: LevelStatus = state.status;
-    if (whole > 0) {
-      drained -= whole;
-      status = drainOxygen(state, whole);
-    }
-    renderScene();
+      drained += dt / SEC_PER_UNIT;
+      const whole = Math.floor(drained);
+      let status: LevelStatus = state.status;
+      if (whole > 0) {
+        drained -= whole;
+        status = drainOxygen(state, whole);
+      }
+      renderScene();
 
-    // 코앞까지 왔을 때 한 번만 으르렁거린다
-    if (!growled && state.maxOxygen > 0 && state.oxygen <= 3 && state.oxygen > 0) {
-      growled = true;
-      sfx.growl();
-      haptics.invalid();
-    }
+      // 코앞까지 왔을 때 한 번만 으르렁거린다
+      if (!growled && state.maxOxygen > 0 && state.oxygen <= 3 && state.oxygen > 0) {
+        growled = true;
+        sfx.growl();
+        haptics.invalid();
+      }
 
-    if (status === 'lost' && !finished) {
-      finished = true;
-      view.setLocked(true);
-      // 잡아먹는 포식자 연출은 아직 없다 (Task 8 에서 Stage3D 에 되살린다)
-      // stage.devour();
-      // 잡아먹히는 연출을 보여준 뒤에 실패 화면을 띄운다
-      window.setTimeout(onLose, 1100);
-    }
-  }, 120);
+      if (status === 'lost' && !finished) {
+        finished = true;
+        view.setLocked(true);
+        // 잡아먹는 포식자 연출은 아직 없다 (Task 8 에서 Stage3D 에 되살린다)
+        // stage.devour();
+        // 잡아먹히는 연출을 보여준 뒤에 실패 화면을 띄운다
+        window.setTimeout(onLose, 1100);
+      }
+    }, 120);
+  }
 
   // 심해 앰비언트는 판에 들어와 있는 동안만 깔린다
   void startAmbience();
@@ -507,6 +589,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     'screen:destroy',
     () => {
       window.clearTimeout(idleTimer);
+      window.clearTimeout(timeoutId);
       window.clearInterval(timer);
       stopAmbience();
       view.destroy();

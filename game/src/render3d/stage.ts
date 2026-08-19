@@ -70,6 +70,14 @@ export class Stage3D implements Stage {
    * 체감 가능한 속도로 낮춰준다.
    */
   private static readonly TIER_DWELL_SEC = 1.5;
+  /**
+   * 잠수부·포식자 glb 로드가 끝났는가 -- ready() 가 이 둘을 합쳐서 준다.
+   * 두 로더 다 자기 실패를 안에서 삼키므로(diver.ts/predators.ts 의 load() 호출부
+   * 참고) 이 프로미스들은 거부하지 않는다 -- 실패해도 "그림 없이 끝났다"로
+   * resolve 된다. ready() 가 절대 안 걸리는 이유가 여기서 이미 보장된다.
+   */
+  private diverReady: Promise<void>;
+  private predatorsReady: Promise<void>;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -111,8 +119,13 @@ export class Stage3D implements Stage {
     this.predators.setMood(this.mood);
 
     this.resize();
-    void this.diver.load().catch((e) => console.warn('잠수부 로드 실패', e));
-    void this.predators.load().catch((e) => console.warn('포식자 로드 실패', e));
+    this.diverReady = this.diver.load().catch((e) => console.warn('잠수부 로드 실패', e));
+    this.predatorsReady = this.predators.load().catch((e) => console.warn('포식자 로드 실패', e));
+  }
+
+  /** Stage 인터페이스 참고 -- 잠수부·포식자 glb 가 다 붙을 때까지. */
+  ready(): Promise<void> {
+    return Promise.all([this.diverReady, this.predatorsReady]).then(() => undefined);
   }
 
   resize(): void {
