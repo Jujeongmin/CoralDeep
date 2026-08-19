@@ -4,11 +4,14 @@
 // 규격을 전부 다루느라 three 본체에 맞먹게 크다. 우리 파일은 메시 하나에 위치·법선·
 // 버텍스 컬러뿐이고, 그 구조는 굽는 도구가 보장한다.
 //
-// diver.glb 는 여기에 애니메이션 프레임도 얹는다(tools/bake-diver-glb.mjs 가
-// Idle 클립을 몇 프레임 스키닝해 구운 것) - 하지만 glTF 정식 애니메이션 규격(스켈레톤,
-// 채널, 보간기)이 아니라 우리만의 커스텀 필드다. 그러면 이 파서가 GLTFLoader 급으로
-// 커질 이유가 없다: extras.diverAnim 에 프레임 수·양자화 스케일·델타 데이터의
-// bufferView 번호만 있고, 그 델타를 어떻게 보간해 재생할지는 diver.ts 가 정한다.
+// diver.glb·anglerfish.glb·goblinShark.glb 는 여기에 애니메이션 프레임도 얹는다
+// (tools/bake-diver-glb.mjs·tools/bake-predators-glb.mjs 가 스킨 클립을 몇 프레임
+// CPU 로 스키닝해 구운 것) - 하지만 glTF 정식 애니메이션 규격(스켈레톤, 채널,
+// 보간기)이 아니라 우리만의 커스텀 필드다. 그러면 이 파서가 GLTFLoader 급으로
+// 커질 이유가 없다: extras.bakedAnim 에 프레임 수·양자화 스케일·델타 데이터의
+// bufferView 번호만 있고, 그 델타를 어떻게 보간해 재생할지는 호출부(diver.ts /
+// predators.ts)가 정한다. 필드 이름이 diverAnim 이 아니라 bakedAnim 인 이유도
+// 같다 — 잠수부 전용이 아니라 이 포맷을 쓰는 모두의 공용 필드다.
 
 export interface GlbMesh {
   position: Float32Array;
@@ -59,15 +62,15 @@ export function parseGlb(buf: ArrayBuffer): GlbMesh {
   const position = read(prim.attributes.POSITION) as Float32Array;
 
   let anim: GlbAnim | null = null;
-  const diverAnim = json.extras?.diverAnim;
-  if (diverAnim) {
-    const bv = json.bufferViews[diverAnim.deltasBufferView];
+  const bakedAnim = json.extras?.bakedAnim;
+  if (bakedAnim) {
+    const bv = json.bufferViews[bakedAnim.deltasBufferView];
     const off = binStart + (bv.byteOffset ?? 0);
     const vertexCount = position.length / 3;
-    const deltaCount = (diverAnim.frameCount - 1) * vertexCount * 3;
+    const deltaCount = (bakedAnim.frameCount - 1) * vertexCount * 3;
     anim = {
-      frameCount: diverAnim.frameCount,
-      scale: diverAnim.scale,
+      frameCount: bakedAnim.frameCount,
+      scale: bakedAnim.scale,
       deltas: new Int16Array(buf.slice(off, off + deltaCount * 2)),
     };
   }

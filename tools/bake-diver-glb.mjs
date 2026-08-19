@@ -18,11 +18,12 @@
 //
 // 텍스처를 안 쓰고 버텍스 컬러로 칠한다. 런타임 이미지 파일이 0개가 된다.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { meshesOf, parseFbx } from './lib/fbx.mjs';
+import { writeGlb } from './lib/glbWrite.mjs';
 import {
   clusterOffsets,
   computeGlobalTransforms,
@@ -201,87 +202,10 @@ function computeNormals(position, index) {
   return normal;
 }
 
-/**
- * 최소 glb 작성기.
- * 읽을 파서도 우리가 쓰므로 규격 전부를 만족시킬 필요는 없다. 그래도 확장자를 .glb 로
- * 쓰는 이상 헤더·청크 구조는 규격대로 맞춘다 - 나중에 다른 도구로 열어볼 때 그게 싸다.
- *
- * anim(diverAnim) 은 glTF 정식 애니메이션 규격이 아니다 - 스켈레톤·채널·보간기까지
- * 구현하면 glb.ts 가 GLTFLoader 급으로 커진다(금지 사항). extras.diverAnim 이라는
- * 우리만의 필드에 얹고, 값은 별도 bufferView 의 원시 Int16 바이트로 둔다.
- */
-function writeGlb(position, normal, color, index, anim) {
-  const pad4 = (n) => (n + 3) & ~3;
-  const deltaBuf = Buffer.from(anim.deltaInt16.buffer, anim.deltaInt16.byteOffset, anim.deltaInt16.byteLength);
-  const bin = Buffer.concat([
-    Buffer.from(position.buffer, position.byteOffset, position.byteLength),
-    Buffer.from(normal.buffer, normal.byteOffset, normal.byteLength),
-    Buffer.from(color.buffer, color.byteOffset, color.byteLength),
-    Buffer.from(index.buffer, index.byteOffset, index.byteLength),
-    deltaBuf,
-  ]);
-  const offs = {
-    pos: 0,
-    nrm: position.byteLength,
-    col: position.byteLength + normal.byteLength,
-    idx: position.byteLength + normal.byteLength + color.byteLength,
-    anim: position.byteLength + normal.byteLength + color.byteLength + index.byteLength,
-  };
-  const json = {
-    asset: { version: '2.0', generator: 'coral-deep bake-diver-glb' },
-    scene: 0,
-    scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0 }],
-    meshes: [
-      { primitives: [{ attributes: { POSITION: 0, NORMAL: 1, COLOR_0: 2 }, indices: 3 }] },
-    ],
-    buffers: [{ byteLength: bin.length }],
-    bufferViews: [
-      { buffer: 0, byteOffset: offs.pos, byteLength: position.byteLength, target: 34962 },
-      { buffer: 0, byteOffset: offs.nrm, byteLength: normal.byteLength, target: 34962 },
-      { buffer: 0, byteOffset: offs.col, byteLength: color.byteLength, target: 34962 },
-      { buffer: 0, byteOffset: offs.idx, byteLength: index.byteLength, target: 34963 },
-      { buffer: 0, byteOffset: offs.anim, byteLength: deltaBuf.length },
-    ],
-    accessors: [
-      { bufferView: 0, componentType: 5126, count: position.length / 3, type: 'VEC3' },
-      { bufferView: 1, componentType: 5126, count: normal.length / 3, type: 'VEC3' },
-      { bufferView: 2, componentType: 5126, count: color.length / 3, type: 'VEC3' },
-      { bufferView: 3, componentType: 5125, count: index.length, type: 'SCALAR' },
-    ],
-    extras: {
-      diverAnim: {
-        clip: ANIM_CLIP,
-        // 프레임 0 은 POSITION(accessor 0) 그대로다. 프레임 1..frameCount-1 은
-        // POSITION 대비 델타를 축마다 대칭 스케일로 양자화한 Int16 다:
-        //   delta[axis] = int16 * scale[axis]
-        // deltasBufferView 안의 레이아웃은 [frame][vertex][xyz] - 즉
-        // frame(0-based, POSITION 다음이니 실제로는 1번 프레임부터) 하나당
-        // vertexCount*3 개의 Int16 이 이어진다. glb.ts 가 읽는 쪽 주석 참고.
-        frameCount: anim.frameCount,
-        scale: anim.scale,
-        deltasBufferView: 4,
-      },
-    },
-  };
-  const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8');
-  const jsonPad = Buffer.alloc(pad4(jsonBuf.length) - jsonBuf.length, 0x20);
-  const binPad = Buffer.alloc(pad4(bin.length) - bin.length, 0);
-  const total = 12 + 8 + jsonBuf.length + jsonPad.length + 8 + bin.length + binPad.length;
-  const head = Buffer.alloc(12);
-  head.writeUInt32LE(0x46546c67, 0); // 'glTF'
-  head.writeUInt32LE(2, 4);
-  head.writeUInt32LE(total, 8);
-  const jsonHead = Buffer.alloc(8);
-  jsonHead.writeUInt32LE(jsonBuf.length + jsonPad.length, 0);
-  jsonHead.writeUInt32LE(0x4e4f534a, 4); // 'JSON'
-  const binHead = Buffer.alloc(8);
-  binHead.writeUInt32LE(bin.length + binPad.length, 0);
-  binHead.writeUInt32LE(0x004e4942, 4); // 'BIN'
-  mkdirSync(dirname(OUT), { recursive: true });
-  writeFileSync(OUT, Buffer.concat([head, jsonHead, jsonBuf, jsonPad, binHead, bin, binPad]));
-  return deltaBuf.length;
-}
+// glb 작성은 tools/lib/glbWrite.mjs 로 옮겼다 — bake-predators-glb.mjs 도 같은
+// 형식을 굽게 되면서 두 도구가 각자 파일 쓰기 코드를 들면 형식이 슬쩍 갈라지기
+// 쉬워서다. extras 필드 이름도 diverAnim 이 아니라 bakedAnim 이다(glbWrite.mjs
+// 주석 참고) — glb.ts 가 그 이름으로 읽는다.
 
 // ---- 굽기 ----
 
@@ -345,7 +269,13 @@ for (let vi = 0; vi < vertCount; vi++) {
 }
 const maxSilhouetteRange = Math.sqrt(maxRangeSq);
 
-const animBytes = writeGlb(position, normal, color, index, { frameCount: FRAME_COUNT, scale, deltaInt16 });
+const animBytes = writeGlb(OUT, {
+  position,
+  normal,
+  color,
+  index,
+  anim: { frameCount: FRAME_COUNT, scale, deltaInt16 },
+});
 
 console.log(`diver.glb  정점 ${position.length / 3}  삼각형 ${index.length / 3}`);
 console.log(
