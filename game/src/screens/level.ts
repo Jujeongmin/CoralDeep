@@ -26,7 +26,6 @@ import {
 import { findFirstHint } from '../core/match.ts';
 import { BoardView } from '../render/boardView.ts';
 import { type Stage, createStage } from '../render3d/index.ts';
-import { preloadSprites } from '../sprites.ts';
 import { recordLevelClear, addPearls, spendHeart, useBoosterItem } from '../economy.ts';
 import { getSave, type BoosterId } from '../storage.ts';
 import { boosterMeta, openFreeBoosterModal, openLoseModal, openWinModal } from './modals.ts';
@@ -95,8 +94,6 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
   targetHint.style.display = 'none';
 
   const isRescue = state.maxOxygen > 0;
-  // 장면은 모든 레벨에 붙는다 — 목표 종류에 따라 앞을 막는 소품만 달라진다
-  preloadSprites();
 
   // 제한 시간은 숫자로 안 보여준다. 다가오는 곰치가 곧 시계다 —
   // 게이지를 같이 띄우면 그림이 아니라 숫자를 보게 되고 긴장이 사라진다.
