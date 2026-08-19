@@ -23,7 +23,9 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { computeFlatNormals, quantizeDeltaFrames } from './lib/bakeAnim.mjs';
+import { linearToSrgb } from './lib/color.mjs';
 import { meshesOf, parseFbx } from './lib/fbx.mjs';
+import { materialPaletteOf } from './lib/fbxMaterial.mjs';
 import { writeGlb } from './lib/glbWrite.mjs';
 import {
   clusterOffsets,
@@ -52,13 +54,50 @@ const OUT = resolve(ROOT, 'game/src/assets/sprites3d/diver.glb');
 const HEAD_TOP_Z = 1.89;
 const FOOT_Z = 0;
 
-// 잠수복 팔레트 (0..255). 구리 헬멧이 정체를 한 번에 알리고, 네오프렌 몸통과 납 부츠가
-// 그걸 받친다. 몸통을 너무 어둡게 두면 640m 물빛에 실루엣이 잠긴다 - 대비는 헬멧이 만든다.
-const HELMET = [186, 148, 86];
-const SUIT = [56, 84, 106];
-const PANTS = [40, 62, 82];
-const BOOT = [118, 104, 88];
-const TINT = { Head: HELMET, Body: SUIT, Legs: PANTS, Feet: BOOT };
+// 잠수복 색 - SpaceSuit FBX 네 부위가 실제로 물고 있는 Material 의 DiffuseColor 를
+// 읽는다(손으로 고른 팔레트가 아니다 - 예전엔 여기서 HELMET/SUIT/PANTS/BOOT 를
+// 하드코딩했는데, 실물 SpaceSuit 사진(Preview.jpg)이 오렌지·화이트 잠수복인데도
+// 파란-회색 배색을 지어냈던 게 문제였다). 네 부위 다 텍스처는 없고(Texture/Video
+// 노드 0개 - 직접 확인함) 재질만 있다 - Quaternius 특유의 flat-shaded 방식이라
+// meshesOf()+materialPaletteOf() 조합만으로 색이 그대로 복원된다.
+//
+// 부위마다 재질이 여러 개다(Head 4개, Body 4개, Legs 4개, Feet 2개 - 헬멧 바이저와
+// 잠수복 본체가 다른 색이라는 뜻, 이게 오렌지/화이트 구분의 핵심이다). 폴리곤은
+// 재질 슬롯 하나씩만 물지만 정점은 서로 다른 재질의 폴리곤 사이 경계에서 공유된다
+// (부위별로 정점의 11~39% 가 두 재질에 걸쳐 있다 - 실측). 정점을 쪼개 진짜
+// 재질 경계를 세우면(스킨 클러스터·델타 배열까지 다 다시 나눠야 한다) 이번
+// 작업의 범위를 넘으므로, 정점마다 인접한 삼각형들의 재질색을 리니어 공간에서
+// 평균 낸다 - 한 재질만 닿은 정점(대다수)은 그 재질 색 그대로 나오고, 경계
+// 정점만 부드럽게 섞인다. buildVertexColors() 참고.
+//
+// DiffuseColor 는 리니어 값이다(Blender FBX/glTF 익스포터 관례 - color.mjs 주석
+// 참고, bake-predators-glb.mjs 가 이미 glTF baseColorFactor 에 같은 변환을 썼다).
+// 감마 변환(linearToSrgb)은 평균을 낸 *뒤에* 한 번만 건다 - 순서를 바꾸면 밝기가
+// 왜곡된다.
+function buildVertexColors(mesh, palette) {
+  const vertCount = mesh.verts.length / 3;
+  const sumLinear = new Float64Array(vertCount * 3);
+  const touchCount = new Float64Array(vertCount);
+  mesh.tris.forEach((tri, i) => {
+    const slot = mesh.triMaterial ? mesh.triMaterial[i] : 0;
+    const mat = palette[slot];
+    if (!mat) throw new Error(`재질 팔레트에 슬롯 ${slot} 이 없다 - Connections 해석이 어긋났을 가능성`);
+    for (const vi of tri) {
+      sumLinear[vi * 3] += mat.color[0];
+      sumLinear[vi * 3 + 1] += mat.color[1];
+      sumLinear[vi * 3 + 2] += mat.color[2];
+      touchCount[vi] += 1;
+    }
+  });
+  const color = new Float32Array(vertCount * 3);
+  for (let vi = 0; vi < vertCount; vi++) {
+    const n = touchCount[vi] || 1; // 어느 삼각형도 안 닿은 고립 정점 방지용
+    color[vi * 3] = linearToSrgb(sumLinear[vi * 3] / n);
+    color[vi * 3 + 1] = linearToSrgb(sumLinear[vi * 3 + 1] / n);
+    color[vi * 3 + 2] = linearToSrgb(sumLinear[vi * 3 + 2] / n);
+  }
+  return color;
+}
 
 // ---- 재생할 애니메이션 클립 ----
 //
@@ -94,7 +133,9 @@ const parts = PART_NAMES.map((name) => {
   const invMeshGlobalNow = invertAffine(meshGlobalNow);
   const clusters = indexClustersByVertex(clusterOffsets(parseSkin(nodes), meshGlobalNow));
   const mesh = meshesOf(nodes)[0];
-  return { name, mesh, clusters, invMeshGlobalNow, rgb: TINT[name] };
+  const palette = materialPaletteOf(nodes, meshModelId);
+  const color = buildVertexColors(mesh, palette);
+  return { name, mesh, clusters, invMeshGlobalNow, color, palette };
 });
 
 const animNodes = parseFbx(readFileSync(resolve(SRC, 'Animations.fbx')));
@@ -122,14 +163,15 @@ function mergedPositionAt(t) {
   return new Float32Array(position);
 }
 
-/** 색·인덱스는 애니메이션과 무관 - 부위별 정점 개수·삼각형만 있으면 한 번만 지으면 된다. */
+/** 색·인덱스는 애니메이션과 무관 - 부위별 정점 색(이미 buildVertexColors() 로 다 지어져
+ * 있다)과 삼각형만 이어붙이면 된다. */
 function buildColorAndIndex() {
   const color = [];
   const index = [];
   let base = 0;
   for (const part of parts) {
     const n = part.mesh.verts.length / 3;
-    for (let i = 0; i < n; i++) color.push(part.rgb[0] / 255, part.rgb[1] / 255, part.rgb[2] / 255);
+    for (let i = 0; i < n; i++) color.push(part.color[i * 3], part.color[i * 3 + 1], part.color[i * 3 + 2]);
     for (const tri of part.mesh.tris) index.push(base + tri[0], base + tri[1], base + tri[2]);
     base += n;
   }
@@ -223,6 +265,27 @@ const animBytes = writeGlb(OUT, {
 });
 
 console.log(`diver.glb  정점 ${position.length / 3}  삼각형 ${index.length / 3}`);
+// 부위별로 실제 구운 정점색 - 재질 슬롯별 원본 리니어 DiffuseColor(감마 변환 전)와
+// 슬롯별 폴리곤 수(어느 색이 그 부위 표면의 얼마를 차지하는지), 그리고 감마
+// 변환까지 마친 뒤 부위 전체 평균 sRGB 를 함께 찍는다 - 렌더링 없이도 "구운 데이터"
+// 자체를 검증할 수 있게.
+for (const part of parts) {
+  const polyCountBySlot = new Map();
+  for (const slot of part.mesh.triMaterial ?? []) polyCountBySlot.set(slot, (polyCountBySlot.get(slot) || 0) + 1);
+  const paletteStr = part.palette
+    .map((m, slot) => {
+      const srgb255 = m.color.map((c) => Math.round(linearToSrgb(c) * 255));
+      const polys = polyCountBySlot.get(slot) || 0;
+      return `[${slot}] ${m.name}=rgb(${srgb255.join(',')}) 삼각형${polys}개`;
+    })
+    .join('  ');
+  let sr = 0, sg = 0, sb = 0;
+  const n = part.color.length / 3;
+  for (let i = 0; i < n; i++) { sr += part.color[i * 3]; sg += part.color[i * 3 + 1]; sb += part.color[i * 3 + 2]; }
+  const avg255 = [sr, sg, sb].map((s) => Math.round((s / n) * 255));
+  console.log(`  ${part.name}  재질 ${part.palette.length}개: ${paletteStr}`);
+  console.log(`  ${part.name}  정점 평균 색(sRGB 0..255, 경계 정점 섞임 포함): rgb(${avg255.join(',')})`);
+}
 console.log(
   `애니메이션  clip=${ANIM_CLIP}  프레임 ${FRAME_COUNT}(루프 ${clip.durationSeconds.toFixed(3)}s 를 균등 샘플)` +
     `  델타 ${(animBytes / 1024).toFixed(1)}KB  축스케일 ${scale.map((s) => s.toExponential(3)).join(', ')}`,

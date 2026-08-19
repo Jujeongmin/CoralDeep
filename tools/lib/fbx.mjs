@@ -1,8 +1,12 @@
 // FBX 바이너리 파서 + 메시 추출.
 //
 // 이 환경에는 Blender 가 없다. 외부 3D 에셋을 굽는 도구들이 공유하는 최소 FBX 리더다:
-// 메시 기하만 읽는다 — 재질·텍스처·스킨은 여기서 필요 없고, 읽으려면 파서가 몇 배로
-// 커진다(스킨이 필요한 도구는 fbxSkin.mjs 가 이 파서 위에 따로 얹는다).
+// 메시 기하만 읽는다 — 텍스처·스킨은 여기서 필요 없고, 읽으려면 파서가 몇 배로
+// 커진다(스킨이 필요한 도구는 fbxSkin.mjs 가 이 파서 위에 따로 얹는다). 재질도
+// 마찬가지로 대부분 여기 없다 — 다만 "폴리곤이 재질 슬롯 몇 번을 쓰는가"만은
+// Geometry 노드 자신의 자식(LayerElementMaterial)이라 meshesOf() 가 triMaterial 로
+// 같이 내보낸다. 슬롯 번호를 실제 색으로 바꾸는 일(Objects/Material,
+// Connections)은 fbxMaterial.mjs 가 fbxSkin.mjs 와 같은 방식으로 얹는다.
 //
 // (한때 여기 정면 직교 투영 소프트웨어 렌더러 + PNG 인코더도 있었다 — 잠수부를
 // PNG 스프라이트로 굽던 bake-diver-3d.mjs 전용이었는데, 그 도구가 glb 굽기
@@ -108,6 +112,11 @@ function findAll(nodes, name, out = []) {
  *
  * FBX 폴리곤 인덱스는 면의 **마지막** 인덱스를 음수(~i)로 표시해 면의 끝을 알린다.
  * n각형은 부채꼴로 쪼갠다.
+ *
+ * triMaterial: 각 삼각형이 속한 원본 폴리곤의 재질 슬롯 번호(LayerElementMaterial,
+ * Geometry 자신의 자식이라 여기서 값싸게 읽힌다 - 슬롯 번호가 실제로 어떤 색인지는
+ * Objects/Material + Connections 를 봐야 하므로 fbxMaterial.mjs 가 그 위에 얹는다,
+ * fbxSkin.mjs 가 스킨을 얹는 것과 같은 구조). 레이어가 없는 지오메트리는 null.
  */
 export function meshesOf(fbxNodes) {
   const out = [];
@@ -116,17 +125,31 @@ export function meshesOf(fbxNodes) {
     const pi = g.children.find((c) => c.name === 'PolygonVertexIndex');
     if (!vs || !pi) continue;
     const verts = vs.props[0];
+
+    const layerMat = g.children.find((c) => c.name === 'LayerElementMaterial');
+    const matMapping = layerMat?.children.find((c) => c.name === 'MappingInformationType')?.props[0];
+    const matArray = layerMat?.children.find((c) => c.name === 'Materials')?.props[0];
+
     const tris = [];
+    const triMaterial = layerMat ? [] : null;
     let face = [];
+    let polyIndex = 0;
     for (const raw of pi.props[0]) {
       const last = raw < 0;
       face.push(last ? ~raw : raw);
       if (last) {
-        for (let k = 1; k + 1 < face.length; k++) tris.push([face[0], face[k], face[k + 1]]);
+        // AllSame = 폴리곤 전부가 슬롯 0 하나 - Blender 가 재질이 하나뿐인 메시에
+        // 흔히 쓰는 축약형이다. ByPolygon 은 폴리곤 순서대로 슬롯이 하나씩 있다.
+        const matSlot = layerMat ? (matMapping === 'AllSame' ? matArray[0] : matArray[polyIndex]) : undefined;
+        for (let k = 1; k + 1 < face.length; k++) {
+          tris.push([face[0], face[k], face[k + 1]]);
+          if (triMaterial) triMaterial.push(matSlot);
+        }
         face = [];
+        polyIndex++;
       }
     }
-    out.push({ verts, tris });
+    out.push({ verts, tris, triMaterial });
   }
   return out;
 }
