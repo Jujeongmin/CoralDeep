@@ -33,6 +33,14 @@ import diverUrl from '../assets/sprites3d/diver.glb?url';
 /** 잠수부 전신이 칸 몇 개 높이인가 — 수로 폭이 한 칸이라 두 칸 가까이가 맞다 */
 export const CELLS_TALL = 1.9;
 
+/**
+ * 잠수부 전용 조명·2차 렌더 패스가 쓰는 레이어 번호(0 은 장면 전체가 쓰는 기본
+ * 레이어라 손대지 않는다). stage.ts 가 카메라를 매 프레임 이 레이어로 한 번 더
+ * 바꿔 잠수부만 다시 그린다 — 이유는 이 파일 아래 keyLight/fillLight 선언부 주석과
+ * stage.ts render() 주석에 있다.
+ */
+export const DIVER_LIGHT_LAYER = 1;
+
 /** 제자리(대기) z — 카메라 쪽으로 당겨 자갈보다 앞에 뜬 것처럼 보이게 한다 */
 const HOME_Z = 1.2;
 /** 탈출 경로 z — 3D 레이어가 보드 앞이므로 z 만 양수면 타일에 안 가려진다 */
@@ -75,53 +83,68 @@ export class Diver {
   private descent: DescentPoint | null = null;
   /** load() 가 아직 fetch 중일 때 dispose() 가 불리면 죽은 scene 에 메시를 넣지 않는다 */
   private disposed = false;
+  /**
+   * 잠수부 전용 조명 둘. stage.ts 의 key(0xdff4ff, 차가운 청백색)·fill(수심 물빛,
+   * 이 수심 top≈rgb(46,163,201) 처럼 상당히 청록으로 쏠린다)은 자갈·포식자·광선판
+   * 전부가 같이 받는 "장면 조명"이라 여기서 값을 못 바꾼다(과제 요구사항 — 장면
+   * 조명은 그대로 둔다). 그래서 잠수부만 따로 밝힐 조명을 새로 만든다.
+   *
+   * 방향은 장면 key 조명과 같은 벡터(-0.6,1,0.8) — 몸의 음영이 나머지 장면과 다른
+   * 방향에서 지는 걸 보면 바로 "따로 논다"는 게 티가 나므로, 색만 데우고 각도는
+   * 맞춘다. 세기(1.05)도 장면 key(1.15)와 비슷한 자릿수로 잡아, 잠수부만 유난히
+   * 밝거나 어둡게 튀지 않게 한다.
+   */
+  private keyLight = new THREE.DirectionalLight(0xfff1dc, 1.05);
+  /** 그림자 쪽이 완전히 까매지지 않게 받쳐 주는 균일한 데운 채움광. */
+  private fillLight = new THREE.AmbientLight(0xffe8cc, 0.42);
+  /** dispose() 에서 한 번에 씬에서 지우기 위한 묶음 — stage.ts 의 this.lights 와 같은 패턴. */
+  private lights = [this.keyLight, this.fillLight];
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    this.mat.fog = false;
-    // 재질 색조(diffuse 곱)만 데운 1라운드 수정은 실측에서 그대로 실패했다
-    // (헬멧 구리색 픽셀이 여전히 0에 가까웠다 — 30/44,550). 원인을 셋으로 좁혀
-    // node_modules/three/src 를 직접 읽어 하나씩 지웠다:
-    //  - fog: WebGLProgram 의 program cache key 가 `useFog = material.fog === true`
-    //    로 정확히 갈리므로(WebGLPrograms.js) `mat.fog = false` 는 구조적으로
-    //    맞다 — 이것만으로는 설명이 안 된다.
-    //  - vColor 도달: color_vertex.glsl.js/color_fragment.glsl.js 를 읽으면
-    //    `diffuseColor *= vColor` 는 감쇠 없는 순수 곱셈이고, diver.glb 를
-    //    parseGlb() 로 직접 파싱해도(노드에서 재현) 헬멧 정점이 정확히
-    //    RGB 186/148/86 로 나온다 — 데이터 자체는 살아있다.
-    //  - 그런데 diffuse(재질색)*vColor 는 순수 곱셈이라, 둘 중 하나라도 라이팅
-    //    체인 어딘가에서 사실상 0에 가깝게 눌리면 재질 색조를 아무리 틀어도
-    //    (배율을 바꿔도) 결과는 그대로 어둡다 — 실측에서 색조 보정이 아무
-    //    효과가 없었던 건 이 곱셈 체인 자체가 신뢰할 수 없다는 신호다.
-    //  - 게다가 waterVolume.ts 의 광선판은 `depthTest:false` + `transparent`
-    //    라(그 파일 주석에 이미 있듯 의도적이다) 항상 불투명 오브젝트 다음에,
-    //    깊이 판정 없이 화면에 얹힌다 — 가운데 광선(5장 중 3번째, k=0.5)은
-    //    clear.cx(빈 띠 중심)에 회전 없이 서고, 이 x 는 잠수부의 anchor.x 와
-    //    같다(둘 다 clearBand() 중심). 즉 잠수부 바로 위에 청록색 가산광이
-    //    거의 항상 얹힌다 — 라이팅 체인이 어떻든 그 위에 또 한 겹 물빛이 덮인다.
-    // 결론: 곱셈(재질 색조·라이팅)에 기대는 방식은 그 체인 전체가 맞아야
-    // 살아남는데, 실측이 두 번 다 이걸 배신했다. 그래서 이번엔 곱셈이 아니라
-    // '무슨 일이 있어도 살아남는' 덧셈으로 바꾼다 — 자기 정점색을 재질 조명이
-    // 끝난 뒤, fog·톤매핑·컬러스페이스 변환까지 다 지나간 마지막 지점(=
-    // dithering_fragment, seafloor.ts 코스틱 패치와 같은 삽입점)에서 그대로
-    // 한 번 더 더한다. 이러면 라이팅 체인이 그를 얼마나 눌렀든, 광선판이 위에
-    // 얼마나 덮이든(가산 0.05~0.15 opacity 수준은 이 덧셈 앞에서 무시할
-    // 수준이다) 그의 진짜 색이 화면에 남는다 — 곱셈에만 기대지 않는다.
-    this.mat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-         // vColor 는 color_pars_fragment 가 이미 선언해 둔 varying 이다(USE_COLOR
-         // 가 vertexColors:true 로 항상 켜져 있으므로 여기서 참조해도 안전하다).
-         // 0.9 배로 그대로 더한다 — 헬멧처럼 색이 강한 정점은 크게(구리 RGB
-         // 186/148/86 근처가 거의 그대로 얹힌다), 어두운 네오프렌 정점(값이
-         // 작다)은 조금만 밝아져 구리/네오프렌 대비는 유지된다. 조명에 따른
-         // 음영(NdotL)은 이 아래 라이팅 결과에 이미 들어있으므로 그 위에
-         // 얹히는 식이라 '조명받는 채로 색이 진하다'로 보이지, 스티커처럼
-         // 평평해지지 않는다.
-         gl_FragColor.rgb += vColor.rgb * 0.9;`,
-      );
-    };
+    this.mat.fog = false; // 카메라 코앞(z=1.2)에 떠 있어 깊이 안개를 받으면 오히려 부자연스럽다.
+
+    // --- 잠수부만 따로 조명을 준다: 왜 곱셈 보정도, 덧셈 트릭도 아니고 '자기 조명' 인가 ---
+    //
+    // 예전엔 두 가지를 다 해봤다.
+    //  1) 재질 색조(diffuse 곱)만 데우기 — 실측에서 헬멧 구리색 픽셀이 그대로 0에
+    //     가까웠다. diffuse*vColor 는 감쇠 없는 순수 곱셈이라(color_fragment.glsl.js),
+    //     라이팅 체인 어딘가가 이미 죽어 있으면 색조를 아무리 틀어도 소용없었다.
+    //  2) 그래서 곱셈 체인을 아예 우회해, 정점색을 라이팅·안개·톤매핑·색공간 변환이
+    //     다 끝난 마지막 지점(dithering_fragment)에서 그대로 덧셈으로 얹었다(0.9배).
+    //     "체인이 뭘 하든 살아남는다"는 게 노림수였는데, 이게 오히려 새 문제다 —
+    //     헬멧 바이저(Grey, rgb 63,63,63 — 어둡다)에도 오렌지 액센트(rgb 163,94,49)와
+    //     똑같은 절대량을 더하니 원래 있던 밝기 차(대비)가 줄어든다. 이번 과제가
+    //     요구하는 "헬멧이 머리와 구분돼야 한다"와 정반대 방향으로 민다.
+    //
+    // 근본 원인은 재질 쪽이 아니라 잠수부가 장면의 key/fill 조명을 자갈·포식자와
+    // 통째로 나눠 쓴다는 것 자체다 — 그 조명은 차가운 청백색(key 0xdff4ff)과 이
+    // 수심의 청록 물빛(fill, depthMood 참고)으로 자갈이 "가라앉은 느낌"이 나게
+    // 맞춰져 있다. 같은 조명 아래서는 잠수부의 오렌지도 그 색조를 나눠 받는다.
+    // 게다가 waterVolume.ts 의 광선판은 depthTest:false + 가산 블렌딩으로, 깊이와
+    // 무관하게 항상 불투명 오브젝트 다음에 그려진다(그 파일 주석 참고) — 가운데
+    // 광선은 clearBand() 중심(=잠수부 anchor.x)에 서므로 잠수부는 그 청록 가산광도
+    // 늘 뒤집어쓴다.
+    //
+    // "장면 조명은 그대로 두고, 잠수부만 다르게 밝힌다"가 이번 요구사항이므로,
+    // 재질 트릭이 아니라 진짜로 조명 자체를 분리한다. three 는 조명 하나가 프레임
+    // 전체에서 어떤 오브젝트를 비출지 오브젝트별로 걸러주지 않는다 — 조명이 이번
+    // 프레임에 반영될지는 camera.layers 하고만 비교한다(그 조명이 어떤 오브젝트에
+    // 실제로 닿을지가 아니다. node_modules/three/src/renderers/webgl/WebGLLights.js
+    // 의 setup() 이 렌더당 딱 한 번 불려 장면 전체가 같이 쓰는 uniform 배열을
+    // 만든다 — 오브젝트별 필터가 없다. WebGLRenderer.js 의 projectObject() 도
+    // object.layers.test(camera.layers) 로만 가른다). 그래서 레이어를 공유하는 것
+    // "만으로는" 장면 조명과 뒤섞이지 않게 분리할 수 없고, stage.ts 가 카메라
+    // 레이어를 바꿔가며 2차 패스로 잠수부만 다시 그려야 진짜로 분리된다 —
+    // stage.ts render() 주석 참고. 여기서는 그 2차 패스가 쓸 잠수부 전용 조명만
+    // 만들어 둔다(keyLight/fillLight, 위 필드 선언).
+    //
+    // 이 조명들도 DIVER_LIGHT_LAYER 에만 놓아, 장면 기본 패스(레이어 0)에서는 아예
+    // 안 잡힌다 — 자갈·포식자·광선판·부유물 쪽 밝기는 이 조명과 무관하게 그대로다.
+    this.keyLight.position.set(-0.6, 1, 0.8);
+    this.keyLight.layers.set(DIVER_LIGHT_LAYER);
+    this.fillLight.layers.set(DIVER_LIGHT_LAYER);
+    this.scene.add(this.keyLight, this.fillLight);
   }
 
   async load(): Promise<void> {
@@ -140,6 +163,10 @@ export class Diver {
     this.anim = mesh.anim;
     this.animFrames = mesh.anim ? unpackAnimFrames(mesh.position, mesh.anim) : null;
     this.mesh = new THREE.Mesh(g, this.mat);
+    // 기본 레이어(0)에서 뺀다 — 장면 기본 패스의 카메라는 계속 레이어 0만 보므로
+    // 거기서는 안 그려지고, stage.ts 가 2차 패스에서 카메라를 이 레이어로 바꿀
+    // 때만(그 프레임엔 keyLight/fillLight 만 활성화된다) 그려진다.
+    this.mesh.layers.set(DIVER_LIGHT_LAYER);
     this.mesh.scale.setScalar(this.homeScale);
     this.mesh.position.copy(this.home);
     this.scene.add(this.mesh);
@@ -241,6 +268,9 @@ export class Diver {
   dispose(): void {
     this.disposed = true;
     if (this.mesh) this.scene.remove(this.mesh);
+    // 생성자에서 scene 에 직접 넣은 잠수부 전용 조명 — 여기서 안 지우면 레벨을
+    // 재입장할 때마다 씬에 조명이 쌓인다(이 프로젝트가 이미 겪은 종류의 누수).
+    for (const l of this.lights) this.scene.remove(l);
     this.geom?.dispose();
     this.mat.dispose();
   }

@@ -10,7 +10,7 @@ import * as THREE from 'three';
 
 import { predatorFor } from '../levels.ts';
 import { depthMood } from '../render/depth.ts';
-import { CELLS_TALL, Diver } from './diver.ts';
+import { CELLS_TALL, DIVER_LIGHT_LAYER, Diver } from './diver.ts';
 import { Drift } from './particles.ts';
 import { Predators } from './predators.ts';
 import { type PlaneView, planeView, pxToWorld, screenToPlane } from './projection.ts';
@@ -267,7 +267,31 @@ export class Stage3D implements Stage {
   }
 
   render(): void {
+    // 1차 패스 -- 기본 레이어(0). 자갈·포식자·부유물·광선판과 장면 key/fill 조명이
+    // 전부 여기 있다. 잠수부는 diver.ts 의 load() 가 DIVER_LIGHT_LAYER 로 옮겨
+    // 둔 터라 카메라 기본 레이어(0)엔 안 걸린다 -- 이 패스의 결과는 잠수부 관련
+    // 변경과 무관하게 지금까지와 완전히 같다(자갈 밝기·광선판 모양 보존 요구사항이
+    // 여기서 지켜진다).
     this.renderer.render(this.scene, this.camera);
+
+    // 2차 패스 -- 카메라를 잠깐 잠수부 전용 레이어로 바꿔 그 위에 잠수부만 다시
+    // 그린다. three 는 조명이 이번 프레임에 반영될지를 camera.layers 로만 가른다
+    // (오브젝트별로 어떤 조명이 어떤 메시에 닿는지 따로 거르지 않는다 --
+    // node_modules/three/src/renderers/WebGLRenderer.js 의 projectObject() 와
+    // webgl/WebGLLights.js 의 setup() 참고, diver.ts 생성자 주석에 근거를 적어 뒀다).
+    // 그래서 "조명과 메시가 레이어만 공유"하는 정도로는 장면 key/fill 과 안 섞이게
+    // 못 막는다 -- 카메라가 이번 패스에서 무슨 레이어를 보는지 자체를 바꿔야
+    // 장면 조명(레이어 0)이 아예 안 잡히고, 잠수부 전용 조명(레이어
+    // DIVER_LIGHT_LAYER)만 반영된다. autoClear 를 꺼서 1차 패스 결과 위에 그대로
+    // 덧그린다 -- 잠수부는 카메라와 가장 가까운(z=1.2) 오브젝트라 깊이 판정도
+    // 그대로 통과한다. 부수 효과로 광선판(가산·깊이 무시, waterVolume.ts)이 이제
+    // 잠수부보다 먼저 그려져 있어 더는 그 위에 덮이지 않는다 -- 잠수부 색이 안
+    // 살아나던 원인 중 하나였던 그 겹침이 자연히 없어진다.
+    this.camera.layers.set(DIVER_LIGHT_LAYER);
+    this.renderer.autoClear = false;
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.autoClear = true;
+    this.camera.layers.set(0);
   }
 
   dispose(): void {
