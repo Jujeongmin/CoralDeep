@@ -1,7 +1,15 @@
 // DOM 헬퍼 · 토스트 · 모달 · 광고 버튼.
 
 import { showRewarded, adBusy } from './ads.ts';
-import { canClaim, canShow, cooldownLeft, noteShown, remainingToday, type PlacementId } from './adPolicy.ts';
+import {
+  adsNotReadyLeft,
+  canClaim,
+  canShow,
+  cooldownLeft,
+  noteShown,
+  remainingToday,
+  type PlacementId,
+} from './adPolicy.ts';
 import { formatDuration, t, tf } from './i18n.ts';
 import { sfx } from './audio.ts';
 import { haptics } from './haptics.ts';
@@ -283,6 +291,10 @@ function unavailableReason(placement: PlacementId): string {
   if (remainingToday(placement) <= 0) return t('adDailyDone');
   const left = cooldownLeft(placement);
   if (left > 0) return tf('adCooldown', { n: formatDuration(left) });
+  // 재고 없음은 이 지면의 사정이 아니라 광고 네트워크의 사정이다 — '오늘 다 봤어요'
+  // 처럼 사용자가 뭘 했기 때문이라고 읽히면 안 되므로 문구를 따로 둔다. 광고제거
+  // 구매자의 '받기' 버튼에는 안 걸린다 (canClaim 은 백오프를 안 본다).
+  if (adsNotReadyLeft() > 0) return t('adNotReady');
   return t('adUnavailable');
 }
 
@@ -353,7 +365,14 @@ export async function watchRewarded(
     claimAdRewardIfOwned(placement, extra);
     return true;
   }
-  toast(outcome.status === 'skipped' ? t('adSkipped') : t('adFailed'), 'warn');
+  toast(
+    outcome.status === 'skipped'
+      ? t('adSkipped')
+      : outcome.status === 'notReady'
+        ? t('adNotReady')
+        : t('adFailed'),
+    'warn',
+  );
   return false;
 }
 

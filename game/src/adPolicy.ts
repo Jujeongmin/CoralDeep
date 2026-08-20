@@ -78,6 +78,31 @@ export function setAdsUnsupported(): void {
   unsupportedEnv = true;
 }
 
+// ---- 재고 없음(no fill) 백오프 ----
+//
+// 광고 네트워크가 "지금 틀 광고가 없다"(AdSense no fill / frequency cap)고 답하는 일이
+// 있다. SDK 에는 미리 물어볼 수 있는 준비 상태 API 가 없어서(showRewarded 하나뿐),
+// 그것을 알 수 있는 시점은 **한 번 요청해 본 뒤**다. 그러면 그 다음부터가 문제다 —
+// 재고가 없는 동안 버튼을 그대로 두면 누를 때마다 빈 광고 창이 떴다 사라지고,
+// 사용자는 "광고가 고장났다"로 읽는다.
+//
+// 그래서 no fill 을 한 번 받으면 잠깐 동안 모든 지면을 닫는다. 지면 하나가 아니라
+// 전부 닫는 이유는 재고가 계정·세션 단위로 비기 때문이다 — 지면만 바꿔 다시 눌러도
+// 같은 답이 온다. `unsupportedEnv` 와 달리 **시간이 지나면 저절로 풀린다**: 재고는
+// 채워지는 것이라 세션 내내 잠글 이유가 없다.
+const NOT_READY_BACKOFF_MS = 5 * MIN;
+let adsNotReadyUntil = 0;
+
+/** ads.ts 가 no fill(= 재고 없음)을 받았을 때 부른다. */
+export function noteAdsNotReady(now: number = Date.now()): void {
+  adsNotReadyUntil = now + NOT_READY_BACKOFF_MS;
+}
+
+/** 재고 없음 백오프가 풀릴 때까지 남은 ms (0 = 지금 요청해도 된다) */
+export function adsNotReadyLeft(now: number = Date.now()): number {
+  return Math.max(0, adsNotReadyUntil - now);
+}
+
 function counterFor(id: string, now: number): { day: string; count: number; lastAt: number } {
   const save = getSave();
   const c = save.adCounters[id];
@@ -99,6 +124,8 @@ function withinLimits(id: PlacementId, now: number): boolean {
 /** 이 지면의 광고를 지금 보여줄 수 있는가 */
 export function canShow(id: PlacementId, now: number = Date.now()): boolean {
   if (unsupportedEnv) return false;
+  // 재고가 없다고 답한 직후에는 아예 요청하지 않는다 — 어차피 같은 답이 온다.
+  if (adsNotReadyLeft(now) > 0) return false;
   return withinLimits(id, now);
 }
 

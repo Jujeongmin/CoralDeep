@@ -10,6 +10,10 @@ import {
   reportLevelClearRemote,
 } from './net/serverAccount.ts';
 
+/**
+ * 하트 풀 크기. **자연 회복이 멈추는 지점**이지 보유 상한이 아니다 —
+ * 일일 보상·광고·룰렛으로 받은 하트는 이 값을 넘겨 쌓인다 (`addHearts`).
+ */
 export const MAX_HEARTS = 5;
 export const HEART_REGEN_MS = 20 * 60 * 1000; // 20분에 1개
 
@@ -99,17 +103,29 @@ export function spendHeart(now: number = Date.now()): boolean {
   return true;
 }
 
+/**
+ * 하트를 더한다. **가득 찬 상태에서 받아도 버리지 않는다** — 5/5 에서 일일 보상이나
+ * 광고로 받은 하트는 6, 7 … 로 그대로 쌓인다.
+ *
+ * 예전에는 `MAX_HEARTS` 로 잘랐다. 그러면 가득 찬 사람에게는 일일 보상의 하트 칸과
+ * 광고 보상이 아무 일도 안 하는 버튼이 된다 — 받았다는 토스트는 뜨는데 숫자는 그대로다.
+ * 받은 것은 받은 대로 준다.
+ *
+ * 상한을 넘은 만큼은 **자연 회복으로는 절대 안 생긴다** (`refreshHearts` 는 `MAX_HEARTS`
+ * 에서 멈춘다). 넘겨 받은 하트는 써서 상한 아래로 내려가야 회복 타이머가 다시 돈다.
+ */
 export function addHearts(n: number, now: number = Date.now()): void {
   refreshHearts(now);
   mutateSave((s) => {
     if (s.hearts >= MAX_HEARTS) s.heartsAt = now;
-    s.hearts = Math.min(MAX_HEARTS, s.hearts + n);
+    s.hearts += n;
   });
 }
 
+/** 하트 풀 충전(진주 결제). 이미 상한을 넘겨 들고 있으면 깎지 않는다. */
 export function fillHearts(now: number = Date.now()): void {
   mutateSave((s) => {
-    s.hearts = MAX_HEARTS;
+    s.hearts = Math.max(s.hearts, MAX_HEARTS);
     s.heartsAt = now;
   });
 }

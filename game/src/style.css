@@ -1509,6 +1509,8 @@ body {
   display: flex;
   justify-content: center;
   gap: 6px;
+  /* 상한을 넘겨 받으면 칸이 5개보다 많아진다 — 좁은 화면에서 넘치면 줄을 바꾼다. */
+  flex-wrap: wrap;
 }
 
 .heart-pip {

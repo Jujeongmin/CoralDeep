@@ -446,7 +446,26 @@ as(A);
   const capSt = { ...st, hearts: 4, heartsAt: Date.now() - 999 * 60 * 1000 };
   userStates.set('0xAAA', capSt);
   const capped = await server.getAccount();
-  check('가득 찬 것 이상으로는 안 넘친다', capped.hearts === 5, capped.hearts);
+  check('자연 회복은 풀(5)에서 멈춘다', capped.hearts === 5, capped.hearts);
+
+  // 상한을 넘겨 들고 있어도 자연 회복이 그 값을 건드리지 않는다 (깎지도, 더하지도 않는다)
+  userStates.set('0xAAA', { ...st, hearts: 7, heartsAt: Date.now() - 999 * 60 * 1000 });
+  const over = await server.getAccount();
+  check('상한을 넘긴 하트는 회복 계산이 건드리지 않는다', over.hearts === 7, over.hearts);
+}
+
+// 10.5) 하트 상한 초과 — 광고·일일 보상으로 받은 하트는 풀(5)을 넘겨 쌓인다
+reset('0xAAA');
+as(A);
+{
+  const st = { ...(await server.getAccount()), hearts: 5, heartsAt: Date.now() };
+  userStates.set('0xAAA', st);
+  const rewarded = await server.claimAdReward('refill-hearts');
+  check('가득 찬 상태에서 광고로 받으면 6개가 된다', rewarded.hearts === 6, rewarded.hearts);
+
+  userStates.set('0xAAA', { ...rewarded, pearls: 500 });
+  const refilled = await server.buyHeartRefill();
+  check('풀 충전은 넘겨 든 하트를 깎지 않는다', refilled.hearts === 6, refilled.hearts);
 }
 
 // 11) 손으로 고친 계정은 정규화된다
@@ -463,7 +482,7 @@ as(A);
   });
   const norm = await server.getAccount();
   check('음수 진주는 0', norm.pearls === 0, norm.pearls);
-  check('하트는 상한을 넘지 않는다', norm.hearts === 5, norm.hearts);
+  check('하트는 절대 상한(99)을 넘지 않는다', norm.hearts === 99, norm.hearts);
   check('음수 부스터는 0', norm.boosters.harpoon === 0, norm.boosters.harpoon);
   check('모르는 부스터 키는 사라진다', norm.boosters.dragon === undefined, norm.boosters);
   check('열린 레벨은 최소 1', norm.highestUnlocked === 1, norm.highestUnlocked);

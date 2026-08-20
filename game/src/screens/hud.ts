@@ -56,7 +56,9 @@ export function createHud(): Hud {
       heartTimer.textContent =
         hearts.infiniteMsLeft > 0 ? formatDuration(hearts.infiniteMsLeft) : '';
     } else {
-      heartValue.textContent = `${hearts.hearts}/${MAX_HEARTS}`;
+      // 상한을 넘겨 들고 있으면 분모를 떼고 숫자만 적는다 — `6/5` 는 고장으로 읽힌다.
+      heartValue.textContent =
+        hearts.hearts > MAX_HEARTS ? String(hearts.hearts) : `${hearts.hearts}/${MAX_HEARTS}`;
       heartTimer.textContent = hearts.msToNext > 0 ? formatDuration(hearts.msToNext) : '';
     }
     heartChip.title = hearts.msToNext > 0 ? tf('heartNext', { t: formatDuration(hearts.msToNext) }) : t('heartFull');

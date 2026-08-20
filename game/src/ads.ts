@@ -11,9 +11,15 @@
 
 import { Verse8Ads } from '@verse8/ads';
 import { t, tf } from './i18n.ts';
-import { noteShown, setAdsUnsupported, type PlacementId } from './adPolicy.ts';
+import { noteAdsNotReady, noteShown, setAdsUnsupported, type PlacementId } from './adPolicy.ts';
 
-export type AdStatus = 'rewarded' | 'skipped' | 'failed';
+/**
+ * `notReady` 는 광고 네트워크에 지금 틀 재고가 없다는 뜻이다(no fill / frequency cap).
+ * 실패(`failed`)와 갈라 두는 이유는 사용자에게 할 말이 다르기 때문이다 — 실패는
+ * "불러오지 못했다"(다시 눌러볼 만하다)이고, 재고 없음은 "지금은 광고가 없다"
+ * (조금 뒤에 오라)다. 지면을 잠그는 방식도 다르다(adPolicy.ts 의 백오프 참고).
+ */
+export type AdStatus = 'rewarded' | 'skipped' | 'failed' | 'notReady';
 
 export interface RewardedOutcome {
   status: AdStatus;
@@ -33,7 +39,18 @@ function ensureInit(): void {
   // ad_dismissed 만 왔으면 재생 중 닫힌 것이다. 콘솔에만 남기고 저장하지는 않는다.
   Verse8Ads.init({
     debug: import.meta.env.DEV,
-    onAdTelemetry: (e) => console.info('[ads]', e.type, e),
+    onAdTelemetry: (e) => {
+      console.info('[ads]', e.type, e);
+      // 렌더러가 "준비 안 됨"을 알려주는 유일한 자리다. 결과 봉투(`platform_error` +
+      // `no_fill`)로도 같은 사실이 오지만, 그쪽은 SSV 대기 등을 거쳐 늦게 올 수 있어서
+      // 먼저 오는 쪽에서 바로 백오프를 건다. 두 번 불러도 만료 시각만 다시 쓸 뿐이다.
+      //
+      // 개발 빌드에서는 걸지 않는다 — 로컬은 Verse8 호스트 밖이라 실물 SDK 가 어떤
+      // 이벤트를 보내든 아래 시뮬레이션으로 폴백하는데, 백오프까지 걸리면 첫 클릭
+      // 이후 5분간 모든 광고 버튼이 죽어 반복 테스트가 막힌다 (unsupported_env 래치를
+      // 프로덕션에서만 거는 것과 같은 이유).
+      if (!import.meta.env.DEV && e.type === 'ad_not_ready') noteAdsNotReady();
+    },
   });
   initialized = true;
 }
@@ -136,6 +153,13 @@ export async function showRewarded(placementId: PlacementId): Promise<RewardedOu
         // 읽히므로, 이후 canShow() 가 모든 지면을 닫는다 (adPolicy.ts).
         if (result.error.code === 'unsupported_env') {
           setAdsUnsupported();
+          return { status: 'failed' };
+        }
+        // 재고 없음. 프로토콜상 `platform_error` + message `no_fill` 로 온다
+        // (@verse8/ads PROTOCOL.md 의 outcome 표: `not-ready` 행).
+        if (result.error.message === 'no_fill') {
+          noteAdsNotReady();
+          return { status: 'notReady' };
         }
         return { status: 'failed' };
       }

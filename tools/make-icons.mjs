@@ -289,14 +289,20 @@ const icons = {
       `<ellipse cx="25" cy="24" rx="6" ry="3.6" fill="#fff" opacity=".3" transform="rotate(-30 25 24)"/>`,
   ),
 
-  // 심연의 진주 — 보드 위의 특수 타일과 같은 무지갯빛으로 맞춘다.
-  // 보드에서는 conic 그라디언트를 쓰지만 SVG 에는 없으므로, 부채꼴 여섯 장을 돌려
-  // 깔고 그 위에 구체 음영을 덮는다. 색만 무지개면 색종이가 되므로 진주의
-  // 하이라이트·반사광은 그대로 얹는다.
+  // 심연의 진주 — 재화 진주(`pearl`)와 **한눈에 갈라져야 한다**.
+  //
+  // 예전에는 무지갯빛 부채꼴 위에 흰 구체 음영을 두껍게 덮었다. 큰 화면에서는 무지개가
+  // 보였지만 상점 목록·일일 보상 칸 크기(32~44px)로 줄이면 흰 구슬만 남아서 재화 진주와
+  // 구분이 안 됐다 — 상점에서 '진주로 사는 물건'과 '진주 자체'가 같은 그림이면 값을
+  // 잘못 읽는다.
+  //
+  // 그래서 이름 그대로 간다: 몸통은 심연(검푸른 구체), 무지갯빛은 **가장자리 고리로만**
+  // 남긴다. 보드 위 특수 타일과의 연결은 그 고리가 잇고, 밝기·색이 반대라 작게 줄여도
+  // 재화 진주와 헷갈리지 않는다.
   'pre-pearl': (() => {
     const cx = 32;
     const cy = 32;
-    const r = 26;
+    const r = 30;
     const hues = [0, 45, 90, 160, 215, 285];
     let wedges = '';
     for (let n = 0; n < hues.length; n++) {
@@ -306,27 +312,31 @@ const icons = {
       const y0 = (cy + Math.sin(a0) * r).toFixed(2);
       const x1 = (cx + Math.cos(a1) * r).toFixed(2);
       const y1 = (cy + Math.sin(a1) * r).toFixed(2);
-      wedges += `<path d="M${cx} ${cy}L${x0} ${y0}A${r} ${r} 0 0 1 ${x1} ${y1}Z" fill="hsl(${hues[n]} 92% 62%)"/>`;
+      wedges += `<path d="M${cx} ${cy}L${x0} ${y0}A${r} ${r} 0 0 1 ${x1} ${y1}Z" fill="hsl(${hues[n]} 95% 66%)"/>`;
     }
     return wrap(
       '<defs>' +
-        '<clipPath id="vpc"><circle cx="32" cy="32" r="24"/></clipPath>' +
-        // 가운데는 하얗게 빠지고 가장자리로 갈수록 색이 진해진다
-        '<radialGradient id="vpw" cx=".38" cy=".3" r=".72">' +
-        '<stop offset="0" stop-color="#ffffff" stop-opacity=".95"/>' +
-        '<stop offset=".45" stop-color="#ffffff" stop-opacity=".35"/>' +
-        '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>' +
-        // 아래에서 되받는 반사광
-        '<radialGradient id="vpb" cx=".6" cy=".9" r=".45">' +
-        '<stop offset="0" stop-color="#ffffff" stop-opacity=".55"/>' +
-        '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>' +
+        // 무지갯빛이 남는 자리 = 바깥 원에서 안쪽 원을 뺀 고리. 두 원을 한 path 에 넣고
+        // evenodd 로 안쪽을 뚫는다 (구멍이 나야 몸통의 어둠이 그대로 보인다).
+        '<clipPath id="vpring" clip-rule="evenodd">' +
+        '<path clip-rule="evenodd" d="M32 8a24 24 0 1 0 0 48a24 24 0 1 0 0-48ZM32 16a16 16 0 1 1 0 32a16 16 0 1 1 0-32Z"/></clipPath>' +
+        // 몸통 — 빛은 왼쪽 위, 가장자리로 갈수록 먹빛으로 떨어진다
+        '<radialGradient id="vpd" cx=".36" cy=".28" r=".88">' +
+        '<stop offset="0" stop-color="#6b53c8"/>' +
+        '<stop offset=".45" stop-color="#241a52"/>' +
+        '<stop offset="1" stop-color="#070312"/></radialGradient>' +
+        // 아래에서 되받는 물빛 반사광. 진주다움은 이 반사광이 담당한다.
+        '<radialGradient id="vpb" cx=".62" cy=".9" r=".42">' +
+        '<stop offset="0" stop-color="#7fe6ff" stop-opacity=".5"/>' +
+        '<stop offset="1" stop-color="#7fe6ff" stop-opacity="0"/></radialGradient>' +
         '</defs>' +
-        `<g clip-path="url(#vpc)"><g style="filter:blur(3px)">${wedges}</g></g>` +
-        '<circle cx="32" cy="32" r="24" fill="url(#vpw)"/>' +
+        '<circle cx="32" cy="32" r="24" fill="url(#vpd)"/>' +
+        `<g clip-path="url(#vpring)" style="filter:blur(3px)" opacity=".95">${wedges}</g>` +
         '<circle cx="32" cy="32" r="24" fill="url(#vpb)"/>' +
-        '<circle cx="32" cy="32" r="24" fill="none" stroke="#3a2a7a" stroke-width="2.5"/>' +
-        '<ellipse cx="24" cy="22" rx="7.5" ry="4.8" fill="#fff" opacity=".75" transform="rotate(-30 24 22)"/>' +
-        '<circle cx="22.5" cy="20.5" r="2.4" fill="#ffffff"/>',
+        '<circle cx="32" cy="32" r="24" fill="none" stroke="#05020c" stroke-width="2.5"/>' +
+        // 하이라이트는 작고 흐리게. 재화 진주만큼 크게 넣으면 다시 흰 구슬로 보인다.
+        '<ellipse cx="24" cy="21" rx="6" ry="3.4" fill="#fff" opacity=".45" transform="rotate(-30 24 21)"/>' +
+        '<circle cx="22.5" cy="20" r="1.8" fill="#ffffff" opacity=".8"/>',
     );
   })(),
 

@@ -91,6 +91,15 @@
 // (새 계정이 신규 게스트 저장과 같은 출발선에 서게).
 
 const MAX_HEARTS = 5;
+/**
+ * 보유 하트의 절대 상한. `MAX_HEARTS` 는 **자연 회복이 멈추는 지점**일 뿐이고,
+ * 일일 보상·광고·룰렛으로 받은 하트는 그 위로 쌓인다 (`economy.ts` 의 `addHearts`).
+ *
+ * 그래도 무한대로 두지는 않는다 — 손으로 고친 계정이 하트를 10만 개 들고 들어오면
+ * 정상 플레이와 구분이 안 된다. 하루에 정상적으로 얻을 수 있는 양(광고 5 + 일일 2 +
+ * 룰렛 몇 개)보다 훨씬 위라 실제 플레이를 막지는 않는다.
+ */
+const HEART_HARD_CAP = 99;
 const HEART_REGEN_MS = 20 * 60 * 1000; // 20분에 1개. `economy.ts` 의 같은 이름과 맞춰 둔다.
 const HEART_REFILL_PRICE = 500;
 const PIGGY_CAP = 1200;
@@ -323,7 +332,7 @@ function normalizeAccount(raw, account) {
     lang: cleanLang(raw.lang),
     pearls: num(raw.pearls),
     stars: num(raw.stars),
-    hearts: Math.max(0, Math.min(MAX_HEARTS, num(raw.hearts))),
+    hearts: Math.max(0, Math.min(HEART_HARD_CAP, num(raw.hearts))),
     heartsAt: typeof raw.heartsAt === 'number' && Number.isFinite(raw.heartsAt) ? raw.heartsAt : Date.now(),
     infiniteHeartsUntil: num(raw.infiniteHeartsUntil),
     boosters: cleanBoosters(raw.boosters),
@@ -382,7 +391,7 @@ function withHeartRegen(a, now) {
  * 타이머가 옛 시각 기준으로 남아 있어 계산이 어긋난다). */
 function grantHearts(a, n, now) {
   const heartsAt = a.hearts >= MAX_HEARTS ? now : a.heartsAt;
-  return { hearts: Math.min(MAX_HEARTS, a.hearts + n), heartsAt };
+  return { hearts: Math.min(HEART_HARD_CAP, a.hearts + n), heartsAt };
 }
 
 class Server {
@@ -452,7 +461,7 @@ class Server {
         pearls: Math.min(server.pearls, num(p.pearls ?? server.pearls)),
         stars: Math.min(server.stars, num(p.stars ?? server.stars)),
         piggy: Math.min(server.piggy, Math.min(PIGGY_CAP, num(p.piggy ?? server.piggy))),
-        hearts: Math.min(server.hearts, Math.max(0, Math.min(MAX_HEARTS, num(p.hearts ?? server.hearts)))),
+        hearts: Math.min(server.hearts, Math.max(0, Math.min(HEART_HARD_CAP, num(p.hearts ?? server.hearts)))),
         // infiniteHeartsUntil 을 지금 새로 켜는 경로는 없다(§ storage.ts 주석) — 그래도
         // 값을 올리는 재동기화를 막아 둔다. 만료 시각이 지나는 것(내려가는 것)만 반영된다.
         infiniteHeartsUntil: Math.min(server.infiniteHeartsUntil, num(p.infiniteHeartsUntil ?? server.infiniteHeartsUntil)),
@@ -660,7 +669,8 @@ class Server {
       return await this.#saveAccount({
         ...a,
         pearls: a.pearls - HEART_REFILL_PRICE,
-        hearts: MAX_HEARTS,
+        // 이미 상한을 넘겨 들고 있으면 깎지 않는다 (`economy.ts` 의 `fillHearts` 와 같은 규칙).
+        hearts: Math.max(a.hearts, MAX_HEARTS),
         heartsAt: Date.now(),
       });
     });

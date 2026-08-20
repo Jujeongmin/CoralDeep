@@ -73,10 +73,12 @@ export function openHeartsModal(refresh: Refresh): void {
           : tf('heartNext', { t: formatDuration(state.msToNext) }),
     });
 
+    // 상한을 넘겨 들고 있으면 칸도 그만큼 늘린다 — 5칸에 6개를 그릴 수는 없다.
+    const pips = state.infinite ? MAX_HEARTS : Math.max(MAX_HEARTS, state.hearts);
     const hearts = el(
       'div',
       { class: 'heart-row' },
-      ...Array.from({ length: MAX_HEARTS }, (_, i) =>
+      ...Array.from({ length: pips }, (_, i) =>
         el(
           'span',
           { class: `heart-pip ${state.infinite || i < state.hearts ? 'on' : ''}` },
@@ -202,7 +204,13 @@ export function openShopModal(refresh: Refresh): void {
         const save = getSave();
 
         body.append(
-          el('p', { class: 'modal-lead' }, `${t('pearls')} `, amount('pearl', save.pearls, 18)),
+          // 아이콘이 곧 '진주'라고 말한다 — 옆에 '진주'라고 또 적으면 같은 말을 두 번 한다.
+          // 다만 아이콘은 aria-hidden 이라 스크린리더에는 숫자만 남으므로 이름은 라벨로 붙인다.
+          el(
+            'p',
+            { class: 'modal-lead', 'aria-label': `${t('pearls')} ${save.pearls}` },
+            amount('pearl', save.pearls, 18),
+          ),
           removeAdsRow(),
           // [광고 지면] 상점 무료 진주 — 광고제거를 샀으면 adButton() 이 알아서 '받기'로 바뀐다.
           adButton('shop-free-coin', tf('freeCoinDesc', { n: 120 }), () => {
@@ -277,7 +285,12 @@ export function openStarModal(refresh: Refresh): void {
   openModal((close) => {
     const body = el('div', { class: 'modal-body' });
     body.append(
-      el('p', { class: 'modal-lead' }, `${t('stars')} `, amount('starfish', getSave().stars, 18)),
+      // 상점과 같은 규칙 — 아이콘이 이름을 대신한다.
+      el(
+        'p',
+        { class: 'modal-lead', 'aria-label': `${t('stars')} ${getSave().stars}` },
+        amount('starfish', getSave().stars, 18),
+      ),
       el('p', { class: 'modal-note', text: t('extraStarDesc') }),
       // [광고 지면] 불가사리 1개
       adButton('extra-star', t('extraStarTitle'), () => {
