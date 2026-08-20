@@ -63,8 +63,15 @@ function withTimeout<T>(p: Promise<T>, timeoutMs = CALL_TIMEOUT_MS): Promise<T> 
 
 let connectPromise: Promise<boolean> | null = null;
 
-/** 연결을 시도한다. 이미 붙어 있으면 그대로, 실패해도 던지지 않고 false 를 돌려준다 —
- * 부르는 쪽이 오프라인을 특별 취급할 필요가 없게. */
+/**
+ * 연결을 시도한다. 이미 붙어 있으면 그대로, 실패해도 던지지 않고 false 를 돌려준다 —
+ * 부르는 쪽이 오프라인을 특별 취급할 필요가 없게.
+ *
+ * **동시에 부르면 하나로 합친다.** Verse8 은 살아 있는 연결이 하나뿐이라 `connect()` 를
+ * 겹쳐 부르면 앞 소켓을 닫는다 (TowerWar `net/agent8.ts` 의 같은 주석). 이 게임은
+ * 판을 깨는 순간 `reportLevelClear` 와 `syncAccount` 가 거의 동시에 나가므로, 합치지
+ * 않으면 서로의 소켓을 닫아 **둘 다 실패**할 수 있다 — 그 판이 계정에 안 올라간다.
+ */
 function connect(): Promise<boolean> {
   if (connectPromise) return connectPromise;
   connectPromise = (async () => {
@@ -74,12 +81,29 @@ function connect(): Promise<boolean> {
       return await withTimeout(server.connect());
     } catch {
       return false;
-    } finally {
-      // 다음 시도가 새로 붙어 보게 캐시를 비운다 (연결이 끊겼을 수도 있으므로).
-      connectPromise = null;
     }
-  })();
+  })().then(
+    (ok) => {
+      // 성공했으면 그대로 둔다 — 다음 호출은 `server.connected` 를 보고 즉시 통과한다.
+      // 실패했으면 캐시를 비워 다음 호출이 새로 붙어 보게 한다.
+      if (!ok) connectPromise = null;
+      return ok;
+    },
+    () => {
+      connectPromise = null;
+      return false;
+    },
+  );
   return connectPromise;
+}
+
+/** 지금 서버에 붙어 있는가 (진단 표시용). */
+export function isOnline(): boolean {
+  try {
+    return GameServer.getInstance().connected === true;
+  } catch {
+    return false;
+  }
 }
 
 async function call<T>(fn: string, args: unknown[] = []): Promise<T | null> {
@@ -160,6 +184,23 @@ function snapshotForSync(): Record<string, unknown> {
 let initDone = false;
 
 /**
+ * 부팅 연결 재시도 간격(ms).
+ *
+ * **한 번 실패하면 그 세션 내내 오프라인이었다.** 회선이 느리거나 서버가 콜드 스타트면
+ * 첫 시도가 8초 타임아웃(`CALL_TIMEOUT_MS`)에 걸려 그냥 죽고, `initDone` 이 이미 켜져
+ * 있어 다시 시도하지도 않았다 — 그 세션에 깬 판은 전부 계정에 안 올라갔다. TowerWar 가
+ * 같은 증상으로 `connectWithRetry`(BOOT_RETRY_MS)를 넣은 자리다.
+ *
+ * 뒤로 갈수록 벌리는 이유는 정말로 서버가 없을 때(배포 전, 완전 오프라인) 헛호출을
+ * 세 번으로 막기 위해서다.
+ */
+const BOOT_RETRY_MS = [2000, 5000, 10000];
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * 부팅 시 한 번 부른다. 로컬 저장을 다 읽은(`loadSave`) 뒤에 불러야 한다.
  *
  * 서버에 이 계정이 처음이면(마이그레이션) 로컬 스냅샷이 그대로 계정이 되고, 이미 있으면
@@ -169,11 +210,24 @@ let initDone = false;
  * **로컬 로딩·첫 화면 진입을 절대 막지 않는다.** `main.ts` 가 이 함수의 완료를 기다리지
  * 않고 다음 단계로 넘어가도 안전하다 — 실패해도 이미 로컬로 정상 동작 중이다.
  */
-export async function initServerAccount(): Promise<void> {
+export async function initServerAccount(onApplied?: () => void): Promise<void> {
   if (initDone) return;
-  initDone = true;
-  const remote = await pushOrPull();
-  if (remote) applyServerAccount(remote);
+
+  for (let attempt = 0; ; attempt++) {
+    // 밀린 클리어부터 올린다. 계정 값을 받아오기 **전에** 보내야 서버가 그 판까지
+    // 반영한 최신 계정을 돌려준다 — 순서가 반대면 방금 올린 판이 빠진 값으로 화면을
+    // 덮었다가 다음 부팅에야 맞는다.
+    await flushPendingClears();
+    const remote = await pushOrPull();
+    if (remote) {
+      initDone = true;
+      applyServerAccount(remote);
+      onApplied?.();
+      return;
+    }
+    if (attempt >= BOOT_RETRY_MS.length) return; // 정말 서버가 없다 — 오프라인으로 간다
+    await wait(BOOT_RETRY_MS[attempt]);
+  }
 }
 
 /**
@@ -218,11 +272,62 @@ export function refreshAccountRemote(): Promise<void> {
   });
 }
 
-/** 레벨 클리어. `economy.ts` 의 `recordLevelClear` 가 로컬을 이미 반영한 뒤 부른다. */
+/**
+ * 레벨 클리어. `economy.ts` 의 `recordLevelClear` 가 로컬을 이미 반영한 뒤 부른다.
+ *
+ * **보내기 전에 저장에 적어 둔다.** 이 호출은 최선노력이라 오프라인·타임아웃이면 그냥
+ * 실패하는데, 예전에는 거기서 끝이었다 — 그 판은 로컬에만 남고 계정에는 영영 안
+ * 올라갔다. 큐에 남겨 두면 다음 부팅(`initServerAccount`)이 순서대로 다시 보낸다.
+ */
 export function reportLevelClearRemote(levelId: number, stars: number): void {
-  void call<RemoteAccount>('reportLevelClear', [levelId, stars]).then((remote) => {
-    if (remote) applyServerAccount(remote);
+  mutateSave((s) => {
+    s.pendingClears = [...s.pendingClears, { levelId, stars }];
   });
+  void flushPendingClears();
+}
+
+/**
+ * 큐에 쌓인 클리어를 **순서대로** 다시 보낸다.
+ *
+ * 순서를 지키는 이유: 서버 보상은 레벨 번호로 계산되고 진행도는 누적이라, 뒤엣것을
+ * 먼저 보내면 중간이 빈 채로 해금 지점만 뛴다. 하나라도 실패하면 거기서 멈춘다 —
+ * 남은 것은 큐에 그대로 남아 다음 기회에 이어서 나간다.
+ *
+ * 동시에 두 번 돌지 않게 잠근다. 부팅 재시도와 클리어 직후 호출이 겹칠 수 있다.
+ */
+let flushing = false;
+
+export async function flushPendingClears(): Promise<void> {
+  if (flushing) return;
+  if (getSave().pendingClears.length === 0) return;
+  flushing = true;
+  try {
+    for (;;) {
+      const next = getSave().pendingClears[0];
+      if (!next) return;
+      const remote = await call<RemoteAccount>('reportLevelClear', [next.levelId, next.stars]);
+      if (!remote) return; // 오프라인 — 큐를 그대로 두고 물러난다
+      mutateSave((s) => {
+        s.pendingClears = s.pendingClears.slice(1);
+      });
+      applyServerAccount(remote);
+    }
+  } finally {
+    flushing = false;
+  }
+}
+
+/** 계정 서버 상태 요약 (설정 화면의 진단 줄). */
+export function netDiagnostics(): {
+  online: boolean;
+  account: string | null;
+  pending: number;
+} {
+  return {
+    online: isOnline(),
+    account: getSave().accountId,
+    pending: getSave().pendingClears.length,
+  };
 }
 
 /**

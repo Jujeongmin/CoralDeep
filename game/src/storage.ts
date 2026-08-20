@@ -57,6 +57,14 @@ export interface SaveData {
   boosters: Record<BoosterId, number>;
   /** 완료한 수족관 태스크 id */
   tasksDone: string[];
+  /**
+   * 아직 계정 서버에 못 올린 레벨 클리어.
+   *
+   * 클리어는 서버가 보상(진주)과 진행도를 계산하는 유일한 입구인데, 그 호출이
+   * 오프라인·타임아웃으로 한 번 실패하면 예전에는 그걸로 끝이었다 — 로컬에만 남고
+   * 계정에는 영영 안 올라갔다. 여기에 쌓아 두고 다음 접속 때 순서대로 다시 보낸다.
+   */
+  pendingClears: { levelId: number; stars: number }[];
   /** 마지막 일일 보상 수령 날짜 키 */
   dailyClaimedDay: string;
   dailyStreak: number;
@@ -100,6 +108,7 @@ export function defaultSave(): SaveData {
     infiniteHeartsUntil: 0,
     boosters: { harpoon: 2, depthCharge: 1, tide: 1, preCurrent: 1, preMine: 0, prePearl: 0 },
     tasksDone: [],
+    pendingClears: [],
     dailyClaimedDay: '',
     dailyStreak: 0,
     wheelFreeDay: '',
@@ -133,6 +142,7 @@ function migrate(raw: unknown): SaveData {
     boosters: { ...base.boosters, ...(data.boosters ?? {}) },
     adCounters: { ...(data.adCounters ?? {}) },
     tasksDone: [...(data.tasksDone ?? [])],
+    pendingClears: Array.isArray(data.pendingClears) ? [...data.pendingClears] : [],
     settings: migrateSettings(base.settings, data.settings),
   };
 }

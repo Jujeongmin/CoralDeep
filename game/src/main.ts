@@ -11,13 +11,13 @@ import {
   mutateSave,
   setAdapter,
 } from './storage.ts';
-import { navigate, registerScreen, setHost } from './router.ts';
+import { currentScreen, navigate, registerScreen, reloadScreen, setHost } from './router.ts';
 import { renderMap } from './screens/map.ts';
 import { renderAquarium } from './screens/aquariumScreen.ts';
 import { renderLevel } from './screens/level.ts';
 import { refreshHearts } from './economy.ts';
 import { startMusic, unlockAudio } from './audio.ts';
-import { initServerAccount, syncNow } from './net/serverAccount.ts';
+import { flushPendingClears, initServerAccount, syncNow } from './net/serverAccount.ts';
 import { initVxShop } from './net/vx.ts';
 
 /**
@@ -63,7 +63,15 @@ async function boot(): Promise<void> {
   // 계정 서버와의 첫 동기화(마이그레이션)는 배경에서 돈다 — 로컬은 이미 위에서
   // loadSave() 로 준비됐으므로, 접속이 느리거나 서버가 없어도(배포 전, 오프라인)
   // 첫 화면 진입을 막지 않는다. 서버 값이 오면 그때 로컬을 계정 값으로 맞춘다.
-  void initServerAccount();
+  //
+  // 계정 값이 도착하면 지금 화면을 다시 그린다. 지도는 이미 로컬 값으로 떠 있는데,
+  // 저장소가 막힌 기기에서는 그 값이 빈 상태라 계정에 있는 진행도가 화면에 안 나타난다
+  // — 다시 그려야 그때 열린 단계까지 보인다. 판을 푸는 중에는 reloadScreen 이 알아서
+  // 지도로 되돌리는 대신 진행을 버리므로, 지도/수족관에 있을 때만 다시 그린다.
+  void initServerAccount(() => {
+    const screen = currentScreen();
+    if (screen === 'map' || screen === 'aquarium') reloadScreen();
+  });
 
   // VXShop 카탈로그(광고제거 가격·구매 가능 여부)도 미리 당겨 둔다. 상점을 열 때 처음
   // 부르면 그 순간 로딩 중이라 폴백 가격이 잠깐 보였다가 실제 값으로 바뀐다 — 여기서
@@ -98,7 +106,11 @@ async function boot(): Promise<void> {
     if (document.visibilityState === 'hidden') {
       void flushSave();
       syncNow();
+      return;
     }
+    // 돌아왔을 때는 밀린 클리어를 다시 밀어 본다. 나가 있는 동안 회선이 살아났을 수
+    // 있고, 이 큐는 오래 들고 있을수록 다른 기기와 어긋난다.
+    void flushPendingClears();
   });
 }
 
