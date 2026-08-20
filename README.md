@@ -369,14 +369,14 @@ Swimming_Impulse/Swimming_Normal)를 갖고 있다. 그중 가장 길고 매끄�
 
 | 소리 | 출처 | 라이선스 |
 | --- | --- | --- |
-| 음악 (`bgm.mp3`) | ["Underwater Theme" — Cleyton Kauffman](https://opengameart.org/content/underwater-theme) | CC0 — 표기 불필요 |
+| 음악 (`bgm.ogg`) | ["Underwater Theme II" — Cleyton Kauffman](https://opengameart.org/content/underwater-theme-ii) | CC0 — 표기 불필요 |
 | 물소리·기포·으르렁 | Freesound (504641 · 852478 · 539823 · 171178) | CC0 |
 | UI·매치 효과음 | [Kenney](https://kenney.nl/assets) | CC0 |
 
-**mp3 를 루프로 돌릴 때 주의**: mp3 는 인코더가 앞뒤에 무음 패딩을 붙여서 그대로
-`loop = true` 로 돌리면 한 바퀴마다 소리가 끊긴다 (원작자도 "루프에는 ogg/wav 를 써라"고
-적어 뒀다). 우리는 어차피 통째로 디코딩해 쓰므로, 디코딩된 버퍼에서 앞뒤 무음을 찾아
-`loopStart`/`loopEnd` 로 잘라낸다 (`loopRange()`) — mp3 그대로도 이음새가 없다.
+**음악은 ogg 로 둔다.** mp3 는 인코더가 앞뒤에 무음 패딩을 붙여서 그대로 `loop = true`
+로 돌리면 한 바퀴마다 소리가 끊긴다 — 원작자도 "루프에는 mp3 말고 ogg/wav 를 써라"라고
+적어 뒀다. 형식을 바꿀 일이 있으면 이 제약을 먼저 확인할 것. ogg 는 그 패딩이 없어
+버퍼를 통째로 돌리면 그대로 이어진다.
 
 ## 룰렛 (`render` 아님 — `screens/wheelView.ts`)
 

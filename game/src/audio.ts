@@ -8,13 +8,13 @@
 //                                       break · coin · star · win · lose
 //   Freesound CC0 — ambience(504641 fission9) · flow(852478 kolbyrfx) ·
 //                   bubble(539823 ristooooo1) · growl(171178 yatoimtop)
-//   OpenGameArt CC0 — bgm: "Underwater Theme" by Cleyton Kauffman
-//                     (https://opengameart.org/content/underwater-theme)
+//   OpenGameArt CC0 — bgm: "Underwater Theme II" by Cleyton Kauffman
+//                     (https://opengameart.org/content/underwater-theme-ii)
 //
 // 큰 원본은 tools 하네스(/dev-audio.html)에서 잘라 모노·저샘플레이트 WAV 로 구웠다.
 
 import ambienceUrl from './assets/audio/ambience.wav';
-import bgmUrl from './assets/audio/bgm.mp3';
+import bgmUrl from './assets/audio/bgm.ogg';
 import breakUrl from './assets/audio/break.ogg';
 import bubbleUrl from './assets/audio/bubble.wav';
 import clearUrl from './assets/audio/clear-1.ogg';
@@ -262,31 +262,6 @@ const MUSIC_GAIN = 0.22;
 const MUSIC_FADE_SECONDS = 3;
 
 /**
- * 디코딩된 앞뒤 무음을 뺀 루프 구간을 찾는다.
- *
- * MP3 는 인코더가 앞뒤에 무음 패딩을 붙인다(mp3 는 프레임 단위라 원본 길이에 딱 못
- * 맞춘다). 그대로 `loop = true` 로 돌리면 한 바퀴마다 그 패딩만큼 소리가 끊겨 —
- * 정확히 원작자가 "루프에는 mp3 말고 ogg/wav 를 써라"라고 적어 둔 그 증상이다.
- * 우리는 어차피 통째로 디코딩해 쓰므로, 그 무음 구간을 찾아 loopStart/loopEnd 로
- * 잘라내면 mp3 로도 이음새 없이 돈다.
- *
- * 임계값은 16비트 한 칸(1/32768 ≈ 0.00003)보다 넉넉히 위로 잡는다 — 디코더가 만드는
- * 아주 작은 잔향까지 무음으로 보려는 것이 아니라, 명백한 침묵만 잘라내려는 것이다.
- */
-const SILENCE_THRESHOLD = 0.001;
-
-function loopRange(buffer: AudioBuffer): { start: number; end: number } {
-  const data = buffer.getChannelData(0);
-  let first = 0;
-  let last = data.length - 1;
-  while (first < last && Math.abs(data[first]) < SILENCE_THRESHOLD) first++;
-  while (last > first && Math.abs(data[last]) < SILENCE_THRESHOLD) last--;
-  // 전부 무음이면(있을 리 없지만) 통째로 돌린다 — 0 길이 루프는 소리를 멈춰 세운다.
-  if (last <= first) return { start: 0, end: buffer.duration };
-  return { start: first / buffer.sampleRate, end: (last + 1) / buffer.sampleRate };
-}
-
-/**
  * 배경 음악을 깐다. 앱이 살아 있는 동안 계속 돈다 — 화면을 옮겨도 안 끊는다.
  * 여러 번 불러도 이미 돌고 있으면 아무 일도 안 한다.
  */
@@ -300,18 +275,21 @@ export async function startMusic(): Promise<void> {
   // 같은 곡이 둘로 들린다.
   if (!buffer || musicSource) return;
 
-  const range = loopRange(buffer);
+  // 버퍼 전체를 그대로 돈다.
+  //
+  // **ogg 라서 그럴 수 있다.** mp3 였다면 인코더가 앞뒤에 붙이는 무음 패딩 때문에 한
+  // 바퀴마다 소리가 끊겨(원작자도 "루프에는 mp3 말고 ogg/wav 를 써라"라고 적어 뒀다)
+  // loopStart/loopEnd 로 그 침묵을 잘라내야 했다. ogg 에는 그 패딩이 없고, 이 곡은
+  // 원작자가 이음새를 맞춰 둔 루프다 — 오히려 여기서 앞뒤 무음을 잘라내면 곡 앞머리의
+  // 페이드인까지 깎여 매 바퀴 소리가 불쑥 시작한다.
   musicSource = ac.createBufferSource();
   musicSource.buffer = buffer;
   musicSource.loop = true;
-  musicSource.loopStart = range.start;
-  musicSource.loopEnd = range.end;
   musicGain = ac.createGain();
   musicGain.gain.setValueAtTime(0.0001, ac.currentTime);
   musicGain.gain.linearRampToValueAtTime(MUSIC_GAIN, ac.currentTime + MUSIC_FADE_SECONDS);
   musicSource.connect(musicGain).connect(bgmBus);
-  // 무음 패딩을 건너뛰고 시작한다 — 첫 바퀴만 앞에 침묵이 붙는 걸 막는다.
-  musicSource.start(0, range.start);
+  musicSource.start();
 }
 
 /** 음악을 세운다. 지금은 배경음 볼륨을 0 으로 내렸을 때만 부른다. */
