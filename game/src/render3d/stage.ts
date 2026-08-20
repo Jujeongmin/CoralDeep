@@ -20,6 +20,10 @@ import { WaterVolume } from './waterVolume.ts';
 
 const FOV = 45;
 const CAM_Z = 10;
+
+/** 덮칠 때 화면이 흔들리는 폭(px) 과 잦아드는 시간(초). */
+const DEVOUR_SHAKE_PX = 9;
+const DEVOUR_SHAKE_SECONDS = 0.8;
 const MAX_DPR = 1.5;
 
 export class Stage3D implements Stage {
@@ -267,6 +271,12 @@ export class Stage3D implements Stage {
   }
 
   shake(): number {
+    // 덮치는 중에는 danger 와 무관하게 크게 흔든다 — 부딪히는 순간이라 진동이
+    // 압박(다가옴)이 아니라 충격이어야 한다. 0.8초에 걸쳐 잦아든다.
+    if (this.predators.lunging()) {
+      const k = Math.max(0, 1 - (this.clock - this.devourAt) / DEVOUR_SHAKE_SECONDS);
+      return Math.sin(this.clock * 52) * DEVOUR_SHAKE_PX * k;
+    }
     // 코앞까지 왔을 때만 흔든다. 늘 흔들면 압박이 아니라 노이즈가 된다.
     if (this.viewState.danger < 0.82) return 0;
     const k = (this.viewState.danger - 0.82) / 0.18;
@@ -275,6 +285,15 @@ export class Stage3D implements Stage {
 
   cheer(): void {}
   rescued(): void {}
+
+  /** 덮치기 시작 시각(this.clock 기준) — shake() 가 감쇠 곡선을 여기서 잰다. */
+  private devourAt = 0;
+
+  devour(): void {
+    this.devourAt = this.clock;
+    this.predators.lunge();
+    this.diver.snatch();
+  }
 
   step(dt: number): void {
     this.observe(dt);

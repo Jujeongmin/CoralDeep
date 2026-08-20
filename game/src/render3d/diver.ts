@@ -74,6 +74,16 @@ const WALK_FALLBACK_LOOP_SECONDS = 1.333;
  */
 const DANGER_TIME_SCALE = 1.6;
 
+// ---- 물려 감 (산소 고갈) ----
+//
+// 포식자의 덮치기(predators.ts LUNGE_SECONDS = 0.8)보다 짧게 끝낸다 — 포식자가 화면을
+// 다 덮기 전에 잠수부는 이미 사라져 있어야 "물고 갔다"로 읽힌다.
+const SNATCH_SECONDS = 0.45;
+/** 채여 올라가는 거리(월드 단위) */
+const SNATCH_RISE = 0.9;
+/** 끌려가며 도는 각(라디안) — 정확히 세운 채로 사라지면 그냥 페이드아웃으로 보인다. */
+const SNATCH_TUMBLE = 0.9;
+
 /** Idle<->Walk 전환에 쓰는 크로스페이드 길이(초). 82px 크기에서는 하드컷도
  * 무난하지만, 두 클립 다 이미 매 프레임 계산해 둔 버퍼라 블렌드가 거의 공짜라서
  * 짧게라도 섞는다 — "갑자기 다른 포즈로 튐" 없이 자세가 이어진다. */
@@ -131,6 +141,9 @@ export class Diver {
   private facingTargetYaw = 0;
   /** load() 가 아직 fetch 중일 때 dispose() 가 불리면 죽은 scene 에 메시를 넣지 않는다 */
   private disposed = false;
+
+  /** 물려 가는 중인가. -1 = 아니다, 0 이상이면 경과 초 (snatch() 참고). */
+  private snatchT = -1;
   /**
    * 잠수부 전용 조명 둘. stage.ts 의 key(0xdff4ff, 차가운 청백색)·fill(수심 물빛,
    * 이 수심 top≈rgb(46,163,201) 처럼 상당히 청록으로 쏠린다)은 자갈·포식자·광선판
@@ -310,10 +323,38 @@ export class Diver {
     return this.homeScreen;
   }
 
+  /**
+   * 물려 간다. 포식자가 덮치는 순간(`Predators.lunge()`) 같이 부른다.
+   *
+   * 포식자가 화면을 채우는 동안 잠수부가 제자리에서 멀쩡히 서 있으면 둘이 서로 다른
+   * 장면처럼 보인다. 짧게 위로 끌려 올라가며 사라지는 것만으로 "잡혔다"가 붙는다.
+   * 되돌리는 경로는 없다 — 이 판은 여기서 끝난다.
+   */
+  snatch(): void {
+    if (this.snatchT >= 0) return;
+    this.snatchT = 0;
+  }
+
   step(dt: number): void {
     if (!this.mesh) return;
     this.t += dt * (1 + this.danger * DANGER_TIME_SCALE);
     this.stepAnim(dt);
+
+    if (this.snatchT >= 0) {
+      this.snatchT += dt;
+      const p = Math.min(1, this.snatchT / SNATCH_SECONDS);
+      // 위로 채여 올라가면서 작아진다. 스케일을 0 까지 내리면 마지막 프레임에
+      // 뒤집힌 노멀이 번쩍이므로 아주 작은 값에서 멈춘다.
+      const base = this.descent ? this.mesh.scale.x : this.homeScale;
+      this.mesh.scale.setScalar(Math.max(base * (1 - p), 1e-4));
+      this.mesh.position.set(
+        this.home.x,
+        this.home.y + p * SNATCH_RISE,
+        this.home.z,
+      );
+      this.mesh.rotation.set(0, 0, p * SNATCH_TUMBLE);
+      return;
+    }
 
     if (this.descent) {
       // 탈출 중: 위치·크기는 setDescent() 가 쥔다(이 경로는 보드 rect 를 legitimate

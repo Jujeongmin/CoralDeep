@@ -150,6 +150,18 @@ const FAR_SCALE = 0.05;
 /** anim.loopSeconds 가 없을 때(정상적으로는 없을 일이 없다 — 방어용) 쓰는 루프 길이(초). */
 const FALLBACK_LOOP_SECONDS = 2.3;
 
+// ---- 덮치기 (산소 고갈) ----
+//
+// 실패 모달은 `screens/level.ts` 가 1.1초 뒤에 띄운다. 덮치기는 그보다 짧게 끝나야
+// 모달이 뜨는 순간 화면이 이미 포식자로 가득 차 있다 — 중간에 잘리면 "다가오다 말았다"가 된다.
+const LUNGE_SECONDS = 0.8;
+/** 카메라(z=10, stage.ts 의 CAM_Z) 바로 앞. 화면 가운데를 몸으로 덮는 자리. */
+const LUNGE_TARGET = new THREE.Vector3(0, 0.4, 6.6);
+/** 덮칠 때 몸집 배수 — 거리만으로는 '가까워졌다'가 약하다. */
+const LUNGE_SCALE = 2.4;
+/** 덮치는 동안 헤엄 애니메이션 속도 — danger 최대치(1 + 1*1.6)보다 더 몰아친다. */
+const LUNGE_ANIM_SPEED = 3.2;
+
 export class Predators {
   private group = new THREE.Group();
   private mesh: THREE.Mesh | null = null;
@@ -171,6 +183,18 @@ export class Predators {
 
   /** step() 이 매 프레임 재계산하는 위치 스크래치 -- lerp 결과를 담을 뿐 새로 할당하지 않는다. */
   private posScratch = new THREE.Vector3();
+
+  /**
+   * 덮치기. -1 = 안 덮치는 중, 0 이상이면 경과 초.
+   *
+   * 산소가 다 떨어지면 포식자는 `near` 에서 멈춰 있으면 안 된다 — 거기까지는
+   * "다가온다"는 압박이고, 마지막 순간에는 실제로 **덮쳐서 화면을 채워야** 잡혔다는
+   * 것이 읽힌다. 접근 경로(far→near)와 달리 이 구간은 danger 와 무관하게 자기 시계로만
+   * 돈다 — 게임은 이미 끝났고 화면은 잠겨 있다.
+   */
+  private lungeT = -1;
+  private lungeFrom = new THREE.Vector3();
+  private lungeFromScale = 0;
   /** load() 가 아직 fetch 중일 때 dispose() 가 불리면 죽은 scene 에 메시를 넣지 않는다 */
   private disposed = false;
 
@@ -244,7 +268,51 @@ export class Predators {
     this.mat.color.setRGB(k, k, k);
   }
 
+  /**
+   * 잠수부를 덮친다. 산소가 0 이 된 순간 딱 한 번 부른다 (screens/level.ts).
+   * 이미 덮치는 중이면 무시한다 — 다시 부르면 궤적이 처음으로 튄다.
+   */
+  lunge(): void {
+    if (this.lungeT >= 0) return;
+    this.lungeT = 0;
+    this.lungeFrom.copy(this.group.position);
+    this.lungeFromScale = this.mesh
+      ? this.mesh.scale.x
+      : this.config.bodyLength * (FAR_SCALE + (1 - FAR_SCALE) * this.danger);
+  }
+
+  /** 덮치는 중인가 — 무대가 화면 흔들림을 이 값으로 가른다. */
+  lunging(): boolean {
+    return this.lungeT >= 0;
+  }
+
+  /**
+   * 덮치기 한 프레임.
+   *
+   * 카메라 바로 앞(LUNGE_TARGET)까지 가속하며 들어오고 몸집도 함께 커진다 — 거리와
+   * 크기가 같이 붙어야 "달려든다"로 읽힌다. 끝나면 그 자리에 머문다(화면을 가린 채로
+   * 실패 모달이 뜬다). 되돌리는 경로는 없다 — 이 판은 여기서 끝이다.
+   */
+  private stepLunge(dt: number): void {
+    this.lungeT += dt;
+    const p = Math.min(1, this.lungeT / LUNGE_SECONDS);
+    // 처음엔 느리게 노려보다 순식간에 뛰어든다 (ease-in cubic)
+    const e = p * p * p;
+    this.posScratch.copy(this.lungeFrom).lerp(LUNGE_TARGET, e);
+    this.group.position.copy(this.posScratch);
+    if (this.mesh) {
+      this.mesh.scale.setScalar(this.lungeFromScale * (1 + e * (LUNGE_SCALE - 1)));
+    }
+    // 꼬리질은 계속 돈다. 얼어붙은 몸이 미끄러져 오면 모형처럼 보인다.
+    this.t += dt * LUNGE_ANIM_SPEED;
+    this.stepAnim();
+  }
+
   step(dt: number): void {
+    if (this.lungeT >= 0) {
+      this.stepLunge(dt);
+      return;
+    }
     this.t += dt * (1 + this.danger * 1.6);
     this.easeDanger(dt);
 

@@ -86,6 +86,40 @@ function volumes(): { bgm: number; sfx: number } {
   return { bgm: s.bgmVolume, sfx: s.sfxVolume };
 }
 
+/**
+ * iOS 의 무음 스위치를 피한다.
+ *
+ * Safari 는 WebAudio 만 쓰는 페이지를 기본적으로 **ambient** 오디오 세션으로 잡는다 —
+ * 이 세션은 기기의 무음 스위치(또는 집중 모드)에 그대로 묶여서, 스위치가 내려가 있으면
+ * 소리가 하나도 안 난다. 볼륨을 올려도 안 들리고 코드에는 아무 오류도 안 남아서
+ * "효과음이 아예 없다"로 보인다.
+ *
+ * Safari 16.4+ 는 `navigator.audioSession.type` 으로 세션 종류를 고를 수 있다.
+ * `playback` 으로 올리면 음악 앱과 같은 취급이라 무음 스위치를 타지 않는다.
+ * 없는 브라우저에서는 조용히 넘어간다(안드로이드·데스크톱은 애초에 이 제약이 없다).
+ */
+function preferPlaybackSession(): void {
+  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+  if (!session) return;
+  try {
+    session.type = 'playback';
+  } catch {
+    // 값을 거부하는 구현이면 기본 세션 그대로 간다
+  }
+}
+
+/**
+ * 멈춰 있는 컨텍스트를 깨운다.
+ *
+ * **`suspended` 만 보면 안 된다.** iOS Safari 는 전화·시리·화면 잠금·앱 전환으로 오디오가
+ * 끊기면 표준에 없는 `interrupted` 상태로 들어간다. `state === 'suspended'` 만 검사하면
+ * 그 경우가 전부 빠져나가서, 앱을 잠깐 벗어났다 돌아온 뒤로는 효과음이 영영 안 난다.
+ * 그래서 "돌고 있지 않으면 깨운다"로 잡는다.
+ */
+function resumeAudio(): void {
+  if (ctx && ctx.state !== 'running') void ctx.resume();
+}
+
 function context(): AudioContext | null {
   const { bgm, sfx: sfxVol } = volumes();
   // 둘 다 0 이면 AudioContext 를 아예 만들지 않는다 (배터리·자동재생 정책)
@@ -95,9 +129,12 @@ function context(): AudioContext | null {
       window.AudioContext ??
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return null;
+    // 세션 종류는 컨텍스트를 만들기 전에 정한다 — 이미 만들어진 뒤에 바꾸면
+    // 그 컨텍스트에는 반영되지 않는 구현이 있다.
+    preferPlaybackSession();
     ctx = new Ctor();
   }
-  if (ctx.state === 'suspended') void ctx.resume();
+  resumeAudio();
   if (!sfxBus) {
     sfxBus = ctx.createGain();
     sfxBus.connect(ctx.destination);
@@ -138,17 +175,43 @@ async function load(name: ClipName): Promise<void> {
  * 이때 짧은 효과음을 미리 받아둔다 — 첫 스왑에서 소리가 늦게 나면 안 눌린 줄 안다.
  */
 export function unlockAudio(): void {
+  let primed = false;
+
   const listener = (): void => {
     const ac = context();
-    if (ac && ac.state === 'suspended') void ac.resume();
+    if (!ac) return;
+    resumeAudio();
+    if (primed) return;
+    primed = true;
+    // iOS 는 제스처 안에서 **실제로 한 번 재생된** 컨텍스트만 완전히 열어준다.
+    // resume() 만으로 되는 버전이 대부분이지만, 무음 버퍼를 한 번 흘려보내는 쪽이
+    // 웹뷰 종류를 안 탄다 (들리지 않으므로 부작용도 없다).
+    try {
+      const silent = ac.createBufferSource();
+      silent.buffer = ac.createBuffer(1, 1, ac.sampleRate);
+      silent.connect(ac.destination);
+      silent.start();
+    } catch {
+      // 버퍼를 못 만드는 환경이면 resume() 만으로 간다
+    }
     for (const name of ['tap', 'swap', 'invalid', 'clear', 'break'] as ClipName[]) {
       void load(name);
     }
-    window.removeEventListener('pointerdown', listener);
-    window.removeEventListener('touchend', listener);
   };
+
+  // **한 번 듣고 떼지 않는다.** 예전에는 첫 터치에서 리스너를 제거했는데, iOS 는 앱을
+  // 벗어났다 돌아오거나 전화가 오면 컨텍스트를 다시 재운다(interrupted). 그 뒤로는
+  // 깨워 줄 사람이 없어서 남은 세션 내내 소리가 안 났다. 계속 달아 두고 매 제스처마다
+  // 상태만 확인한다 — 이미 돌고 있으면 resume() 은 아무 일도 안 한다.
   window.addEventListener('pointerdown', listener);
   window.addEventListener('touchend', listener);
+
+  // 화면으로 돌아왔을 때도 깨운다. 제스처 없이 부르는 resume() 이라 거부될 수 있지만,
+  // 거부돼도 다음 터치에서 위 리스너가 다시 잡는다 — 성공하면 돌아오자마자 배경음이
+  // 이어져서 "돌아왔더니 소리가 죽어 있다"가 사라진다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resumeAudio();
+  });
 }
 
 /** 한 번 재생. rate 로 음높이를 바꾼다 (콤보가 깊을수록 올린다). */

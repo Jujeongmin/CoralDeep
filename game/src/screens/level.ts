@@ -574,8 +574,11 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       if (status === 'lost' && !finished) {
         finished = true;
         view.setLocked(true);
-        // 잡아먹는 포식자 연출은 아직 없다 (Task 8 에서 Stage3D 에 되살린다)
-        // stage.devour();
+        // 포식자가 덮치고 잠수부가 물려 간다. 3D 무대가 아직(로딩 실패 등) 없으면
+        // 조용히 넘어간다 — 소리와 진동만으로도 "잡혔다"는 남는다.
+        stage?.devour();
+        sfx.growl();
+        haptics.invalid();
         // 잡아먹히는 연출을 보여준 뒤에 실패 화면을 띄운다
         window.setTimeout(onLose, 1100);
       }

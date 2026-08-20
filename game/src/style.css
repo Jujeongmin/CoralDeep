@@ -225,9 +225,20 @@ body {
   min-width: 0;
 }
 
+/* HUD 는 줄이지 않는다 — 숫자가 잘리면 값을 못 읽는다. 대신 제목판이 줄어든다.
+   390px 폭(아이폰 12 Pro)에서 제목판 + 하트/진주/불가사리 칩 셋의 자연 폭 합이
+   화면을 넘겨서, 둘 중 누구도 안 줄면 서로 겹쳐 보였다. */
+.screen-head .hud {
+  flex-shrink: 0;
+}
+
 /* 선체에 볼트로 박은 명판. 글자는 파낸 자국(어두운 글자 + 아래쪽 하이라이트). */
 .brand h1 {
   display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   padding: 3px 8px 2px;
   border: 1px solid var(--brass-deep);
@@ -902,12 +913,19 @@ body {
 }
 
 /* 하단 독 — 리벳으로 박은 조작반 */
+/* 높이는 `min-height` 다. 고정 `height` 로 두면 글자 크기 설정이 큰 기기에서
+   라벨이 한 칸을 넘겨 아이콘이 상자 밖으로 삐져나온다.
+
+   아래쪽 safe-area 인셋은 여기서 **다시 더하지 않는다** — #app 이 이미 네 방향
+   인셋을 패딩으로 잡고 있어서, 여기서 한 번 더 더하면 홈 인디케이터 높이(아이폰
+   기준 34px)만큼 이중으로 먹는다. 고정 높이 72px 안에서 그만큼을 패딩이 가져가면
+   남는 32px 에 아이콘(26px)+라벨이 안 들어가 밖으로 밀려 나온다. */
 .dock {
   display: flex;
   justify-content: space-around;
   gap: 2px;
-  height: var(--dock-h);
-  padding: 8px 6px calc(6px + env(safe-area-inset-bottom));
+  min-height: var(--dock-h);
+  padding: 8px 6px 6px;
   border-top: 1px solid var(--brass-deep);
   background:
     linear-gradient(180deg, rgba(190, 225, 240, 0.07) 0 1px, transparent 1px),
@@ -949,15 +967,25 @@ body {
 }
 
 /* 대기 중인 보상 — 켜진 표시등 */
+/* 아이콘(26px)의 오른쪽 위 모서리에 붙인다. 예전에는 `right: 22%` 로 버튼 폭의
+   비율을 썼는데, 버튼 폭은 화면 폭과 칸 수에 따라 달라져서 기기마다 배지가 라벨
+   위나 아이콘 한가운데로 옮겨 다녔다. 아이콘은 늘 버튼 가운데 있으므로 가운데에서
+   반지름만큼 밀어내면 어느 폭에서도 같은 자리다. */
 .dock-badge {
   position: absolute;
-  top: 2px;
-  right: 22%;
+  top: 6px;
+  right: calc(50% - 17px);
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--canvas-red);
   box-shadow: 0 0 5px rgba(224, 85, 47, 0.9);
+}
+
+/* 받을 것이 없으면 꺼진다. 요소를 지우지 않고 숨기는 이유는 map.ts 가 이 표시등을
+   한 번 만들어 두고 상태만 바꾸기 때문이다 (그 파일 badgeRefreshers 주석 참고). */
+.dock-badge.is-off {
+  display: none;
 }
 
 /* ---------- 인게임 ---------- */
@@ -1278,11 +1306,12 @@ body {
   text-align: center;
 }
 
+/* 아래 인셋은 #app 이 이미 잡는다 (.dock 주석 참고) */
 .booster-bar {
   display: flex;
   justify-content: center;
   gap: 10px;
-  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  padding: 8px 12px 10px;
 }
 
 /* 3D 로드 대기 중엔 부스터도 함께 죽인다 -- busy=true 가 클릭을 이미 막지만,
@@ -1328,7 +1357,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  /* 아래 인셋은 #app 이 이미 잡는다 (.dock 주석 참고) */
+  padding-bottom: 12px;
 }
 
 /* 수조는 선체에 박힌 관측창이다 — 두꺼운 황동 테와 안쪽 그늘 */
@@ -2276,6 +2306,26 @@ body {
 
 /* ---------- 작은 화면 / 가로 모드 ---------- */
 
+/* 좁은 폰(아이폰 12 Pro 390px 등) — HUD 칩을 한 단계 좁혀 헤더 한 줄에 넣는다.
+   칩을 그대로 두고 제목만 줄이면 제목판이 글자 한두 개까지 깎여 명판으로 안 읽힌다. */
+@media (max-width: 400px) {
+  .screen-head {
+    gap: 6px;
+    padding: 8px 8px 6px;
+  }
+
+  .hud-chip {
+    gap: 3px;
+    padding: 5px 5px;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+
+  .hud-timer {
+    font-size: 9px;
+  }
+}
+
 /* 세로가 짧은 폰 (가로로 눕혔을 때) — 헤더·독을 줄이고 보드를 최대한 살린다 */
 @media (max-height: 560px) {
   :root {
@@ -2312,7 +2362,7 @@ body {
 
   .booster-bar {
     gap: 8px;
-    padding: 4px 12px calc(6px + env(safe-area-inset-bottom));
+    padding: 4px 12px 6px;
   }
 
   .booster-btn {

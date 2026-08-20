@@ -93,7 +93,7 @@ export function renderMap(host: HTMLElement): void {
       ),
     );
     if (isCurrent) node.id = 'current-level';
-    node.addEventListener('click', () => startLevel(id, hud.refresh));
+    node.addEventListener('click', () => startLevel(id, () => refreshAll()));
     path.append(node);
   }
 
@@ -101,35 +101,66 @@ export function renderMap(host: HTMLElement): void {
    * @param label   버튼에 보이는 짧은 이름 (독은 6칸이라 길면 두 줄로 접힌다)
    * @param full    스크린리더가 읽을 온전한 이름. 없으면 label 을 쓴다.
    */
+  /**
+   * 배지가 붙는 칸은 **표시등을 항상 만들어 두고 보이기만 껐다 켠다.**
+   *
+   * 예전에는 화면을 그릴 때 `badge` 가 참인 칸에만 `<i>` 를 넣었다. 지도는 한 번
+   * 그려지고 그대로 남는 화면이라, 일일 보상을 받고 모달을 닫아도 그 `<i>` 는 그
+   * 자리에 그대로 켜져 있었다 — 받을 게 없는데 빨간 불만 남는다. 갱신 함수가 매번
+   * 다시 계산해서 클래스만 바꾸도록 뒤집는다.
+   */
+  const badgeRefreshers: (() => void)[] = [];
+
   const bottomButton = (
     name: IconName,
     label: string,
     onClick: () => void,
-    badge = false,
+    pending: (() => boolean) | null = null,
     full = label,
   ): HTMLElement => {
+    const dot = pending ? el('i', { class: 'dock-badge' }) : null;
     const btn = el(
       'button',
       { class: 'dock-btn', 'aria-label': full },
       icon(name, 26, 'dock-icon'),
       el('span', { class: 'dock-label', text: label }),
-      badge ? el('i', { class: 'dock-badge' }) : null,
+      dot,
     );
+    if (pending && dot) {
+      const sync = (): void => {
+        dot.classList.toggle('is-off', !pending());
+      };
+      sync();
+      badgeRefreshers.push(sync);
+    }
     btn.addEventListener('click', onClick);
     return btn;
+  };
+
+  /** HUD 숫자와 독 표시등을 함께 갱신한다 — 모달이 닫힐 때마다 이걸 넘긴다. */
+  const refreshAll = (): void => {
+    hud.refresh();
+    for (const sync of badgeRefreshers) sync();
   };
 
   const dock = el(
     'nav',
     { class: 'dock' },
     bottomButton('aquarium', t('aquarium'), () => navigate('aquarium')),
-    bottomButton('shop', t('shop'), () => openShopModal(hud.refresh)),
+    bottomButton('shop', t('shop'), () => openShopModal(refreshAll)),
     // 독 라벨은 짧은 이름을 쓴다. 모달 제목은 긴 이름 그대로다.
-    bottomButton('wheel', t('wheelShort'), () => openWheelModal(hud.refresh), wheelFreeAvailable(), t('wheelTitle')),
-    bottomButton('gift', t('dailyShort'), () => openDailyModal(hud.refresh), dailyAvailable(), t('dailyTitle')),
-    bottomButton('piggy', t('piggyShort'), () => openPiggyModal(hud.refresh), piggyReady(), t('piggyTitle')),
-    bottomButton('settings', t('settings'), () => openSettingsModal(hud.refresh)),
+    bottomButton('wheel', t('wheelShort'), () => openWheelModal(refreshAll), wheelFreeAvailable, t('wheelTitle')),
+    bottomButton('gift', t('dailyShort'), () => openDailyModal(refreshAll), dailyAvailable, t('dailyTitle')),
+    bottomButton('piggy', t('piggyShort'), () => openPiggyModal(refreshAll), piggyReady, t('piggyTitle')),
+    bottomButton('settings', t('settings'), () => openSettingsModal(refreshAll)),
   );
+
+  // 모달을 거치지 않고도 바뀌는 것들이 있다 — 자정을 넘기면 일일 보상·룰렛이 다시
+  // 열리고, 저금통은 레벨을 깨고 돌아오면 차 있을 수 있다. HUD 시계와 같은 주기로
+  // 함께 확인한다 (계산은 저장값 비교뿐이라 비용이 없다).
+  const badgeTimer = window.setInterval(() => {
+    for (const sync of badgeRefreshers) sync();
+  }, 1000);
 
   const header = el(
     'header',
@@ -156,7 +187,14 @@ export function renderMap(host: HTMLElement): void {
     document.getElementById('current-level')?.scrollIntoView({ block: 'center' });
   });
 
-  host.addEventListener('screen:destroy', () => hud.destroy(), { once: true });
+  host.addEventListener(
+    'screen:destroy',
+    () => {
+      window.clearInterval(badgeTimer);
+      hud.destroy();
+    },
+    { once: true },
+  );
 }
 
 export function startLevel(levelId: number, refresh: () => void): void {
