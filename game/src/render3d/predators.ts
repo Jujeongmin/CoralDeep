@@ -95,9 +95,9 @@ const CONFIG: Record<PredatorKind, PredatorConfig> = {
   // (예전 곰치 자리를 이어받는다).
   anglerfish: {
     url: anglerfishUrl,
-    far: new THREE.Vector3(4.5, 2.2, -3.0),
-    near: new THREE.Vector3(1.35, 1.85, 1.65),
-    bodyLength: 1.25,
+    far: new THREE.Vector3(4.5, 2.7, -3.0),
+    near: new THREE.Vector3(1.35, 2.06, 1.65),
+    bodyLength: 1.93,
     reach: 0.53,
     faceTravel: true,
   },
@@ -106,8 +106,8 @@ const CONFIG: Record<PredatorKind, PredatorConfig> = {
   goblinShark: {
     url: goblinSharkUrl,
     far: new THREE.Vector3(-5.0, 2.6, -3.2),
-    near: new THREE.Vector3(-1.5, 2.0, 1.7),
-    bodyLength: 1.5,
+    near: new THREE.Vector3(-1.5, 2.05, 1.7),
+    bodyLength: 1.81,
     reach: 0.56,
     faceTravel: true,
   },
@@ -118,8 +118,8 @@ const CONFIG: Record<PredatorKind, PredatorConfig> = {
   squid: {
     url: squidUrl,
     far: new THREE.Vector3(0.2, 5.8, -2.5),
-    near: new THREE.Vector3(0.9, 2.9, 1.6),
-    bodyLength: 1.2,
+    near: new THREE.Vector3(0.9, 2.49, 1.6),
+    bodyLength: 1.81,
     reach: 0.52,
     faceTravel: false,
   },
@@ -146,6 +146,15 @@ const WOBBLE_FREQ = 1.3;
  * 벌렸다(코디네이터 리뷰 — "차이가 화면에서 안 보인다"는 피드백에 대한 여유분).
  */
 const FAR_SCALE = 0.05;
+
+/**
+ * danger -> 크기에 거는 지수. 1 이면 선형이다.
+ *
+ * 1보다 크면 앞부분이 완만하고 뒤로 갈수록 급해진다 — 산소·이동 수가 얼마 안 남았을 때
+ * 몸집이 눈에 띄게 불어나서 "다가온다"가 그 구간에 몰린다. 위치(far->near 보간)는
+ * 선형 그대로라 접근 자체는 판 내내 보인다.
+ */
+const SCALE_EASE = 1.35;
 
 /** anim.loopSeconds 가 없을 때(정상적으로는 없을 일이 없다 — 방어용) 쓰는 루프 길이(초). */
 const FALLBACK_LOOP_SECONDS = 2.3;
@@ -324,7 +333,11 @@ export class Predators {
     this.group.position.copy(this.posScratch);
 
     if (this.mesh) {
-      const scaleFactor = FAR_SCALE + (1 - FAR_SCALE) * this.danger;
+      // 크기는 danger 에 **선형이 아니게** 붙인다. 선형이면 판 내내 고르게 커져서
+      // "커지고 있다"가 배경 변화로 묻힌다 — 위협은 마지막 구간에서 몰려와야 읽힌다.
+      // 위치는 그대로 선형이라 다가오는 경로 자체는 계속 보인다.
+      const eased = Math.pow(this.danger, SCALE_EASE);
+      const scaleFactor = FAR_SCALE + (1 - FAR_SCALE) * eased;
       this.mesh.scale.setScalar(this.config.bodyLength * scaleFactor);
     }
 

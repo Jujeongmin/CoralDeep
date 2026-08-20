@@ -47,9 +47,9 @@ interface PredatorConfig {
 }
 
 const CONFIG: Record<PredatorKind, PredatorConfig> = {
-  anglerfish: { far: [4.5, 2.2, -3.0], near: [1.35, 1.85, 1.65], bodyLength: 1.25, reach: 0.53 },
-  goblinShark: { far: [-5.0, 2.6, -3.2], near: [-1.5, 2.0, 1.7], bodyLength: 1.5, reach: 0.56 },
-  squid: { far: [0.2, 5.8, -2.5], near: [0.9, 2.9, 1.6], bodyLength: 1.2, reach: 0.52 },
+  anglerfish: { far: [4.5, 2.7, -3.0], near: [1.35, 2.06, 1.65], bodyLength: 1.93, reach: 0.53 },
+  goblinShark: { far: [-5.0, 2.6, -3.2], near: [-1.5, 2.05, 1.7], bodyLength: 1.81, reach: 0.56 },
+  squid: { far: [0.2, 5.8, -2.5], near: [0.9, 2.49, 1.6], bodyLength: 1.81, reach: 0.52 },
 };
 
 /** projection.ts 의 planeView() 와 같은 식 — worldW 는 y 경계 계산에 안 쓰여 생략한다 */
@@ -93,9 +93,11 @@ const KINDS: PredatorKind[] = ['anglerfish', 'goblinShark', 'squid'];
           `(${diameterNearPx.toFixed(1)}px) 의 15% 이상이다 — 접근이 화면에서 잘 안 보일 만큼 좁다`,
       );
       // near 자체도 "위협적"이라 부를 만큼 커야 한다(너무 작아지면 반대 방향 회귀).
+      // 하한을 200px 로 올렸다. 155~198px 이던 시절에 "다가오는 위협이 안 느껴진다"는
+      // 피드백을 받았다 — 812px 화면에서 그 정도로는 배경의 큰 물고기로만 읽힌다.
       assert.ok(
-        diameterNearPx > 100,
-        `${kind}: danger=1 지름(${diameterNearPx.toFixed(1)}px)이 100px 도 안 된다 — 가까이 와도 안 위협적이다`,
+        diameterNearPx > 200,
+        `${kind}: danger=1 지름(${diameterNearPx.toFixed(1)}px)이 200px 도 안 된다 — 가까이 와도 안 위협적이다`,
       );
     });
   }

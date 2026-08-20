@@ -278,9 +278,12 @@ export class Stage3D implements Stage {
       return Math.sin(this.clock * 52) * DEVOUR_SHAKE_PX * k;
     }
     // 코앞까지 왔을 때만 흔든다. 늘 흔들면 압박이 아니라 노이즈가 된다.
-    if (this.viewState.danger < 0.82) return 0;
-    const k = (this.viewState.danger - 0.82) / 0.18;
-    return Math.sin(this.clock * 34) * 3.2 * k;
+    // 시작 지점을 0.82 에서 0.72 로 당기고 폭도 키웠다 — "다가오는 위협이 안 느껴진다"는
+    // 피드백에 대해, 크기(predators.ts)만으로는 마지막 몇 초에만 몰려서 그 전 구간이
+    // 조용했다. 화면이 먼저 떨리기 시작하면 그 구간이 압박으로 읽힌다.
+    if (this.viewState.danger < 0.72) return 0;
+    const k = (this.viewState.danger - 0.72) / 0.28;
+    return Math.sin(this.clock * 38) * 4.5 * k;
   }
 
   cheer(): void {}
