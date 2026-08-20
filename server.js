@@ -386,6 +386,23 @@ function withHeartRegen(a, now) {
   return { ...a, hearts, heartsAt };
 }
 
+/**
+ * 진주를 준다. **`economy.ts` 의 `addPearls` 와 같은 규칙이어야 한다** — 쓰지 않은 진주의
+ * 30% 가 저금통에 쌓인다.
+ *
+ * 이게 없어서 저금통이 통째로 깨져 있었다. 서버는 진주만 올리고 저금통은 광고
+ * (`piggy-bank-boost`)로만 올렸는데, `syncAccount` 는 저금통을 `min(서버, 클라이언트)` 로
+ * 받는다 — 로컬에서 판을 깨며 쌓은 저금통이 동기화 한 번에 서버의 낮은 값으로 깎이고,
+ * `applyServerAccount` 가 그 값을 다시 로컬에 써 넣었다. 즉 한 세션 동안만 쌓이고 다음
+ * 부팅에 사라졌다.
+ */
+function grantPearls(a, n) {
+  return {
+    pearls: a.pearls + n,
+    piggy: Math.min(PIGGY_CAP, a.piggy + Math.ceil(n * 0.3)),
+  };
+}
+
 /** 하트를 grant 만큼 더한다. 가득 찬 상태에서 더 받으면 회복 타이머를 지금으로 되돌린다
  * (`economy.ts` 의 `addHearts` 와 같은 규칙 — 안 그러면 꽉 찬 채로 광고를 봐도 다음 회복
  * 타이머가 옛 시각 기준으로 남아 있어 계산이 어긋난다). */
@@ -559,7 +576,7 @@ class Server {
 
       return await this.#saveAccount({
         ...a,
-        pearls: a.pearls + pearls,
+        ...grantPearls(a, pearls),
         stars: a.stars + starsGained,
         levelStars: { ...a.levelStars, [id]: Math.max(prevStars, clampedStars) },
         highestUnlocked: Math.max(a.highestUnlocked, id + 1),
@@ -594,7 +611,7 @@ class Server {
       return await this.#saveAccount({
         ...a,
         ...heartPatch,
-        pearls: a.pearls + reward.pearls,
+        ...grantPearls(a, reward.pearls),
         boosters,
         dailyClaimedDay: today,
         dailyStreak: streak + 1,
@@ -638,16 +655,16 @@ class Server {
       let patch = {};
       if (placementId === 'daily-chest') {
         if (!a.lastDaily || a.lastDaily.day !== today || a.lastDaily.doubled) throw new Error('no_reward');
-        patch = { pearls: a.pearls + a.lastDaily.pearls, lastDaily: { ...a.lastDaily, doubled: true } };
+        patch = { ...grantPearls(a, a.lastDaily.pearls), lastDaily: { ...a.lastDaily, doubled: true } };
       } else if (placementId === 'double-coins') {
         if (!a.lastLevelClear || a.lastLevelClear.doubled) throw new Error('no_reward');
         patch = {
-          pearls: a.pearls + a.lastLevelClear.pearls,
+          ...grantPearls(a, a.lastLevelClear.pearls),
           lastLevelClear: { ...a.lastLevelClear, doubled: true },
         };
       } else {
         const grant = AD_GRANTS[placementId];
-        if (grant.pearls) patch.pearls = a.pearls + grant.pearls;
+        if (grant.pearls) Object.assign(patch, grantPearls(a, grant.pearls));
         if (grant.stars) patch.stars = a.stars + grant.stars;
         if (grant.piggy) patch.piggy = Math.min(PIGGY_CAP, a.piggy + grant.piggy);
         if (grant.hearts) Object.assign(patch, grantHearts(a, grant.hearts, now));
@@ -705,7 +722,11 @@ class Server {
     return await $lock(`acct:${$sender.account}`, async () => {
       const a = await this.#loadAccount();
       if (a.piggy < PIGGY_CAP) throw new Error('not_ready');
-      return await this.#saveAccount({ ...a, pearls: a.pearls + a.piggy, piggy: 0 });
+      // 비우고 그 액수를 진주로 준다. 지급은 다른 곳과 같은 규칙을 타므로(grantPearls)
+      // 받은 진주의 30% 가 곧바로 다시 쌓인다 — `economy.ts` 의 openPiggyBank 가
+      // addPearls 를 거치는 것과 같은 결과여야 min-wins 동기화에서 안 어긋난다.
+      const emptied = { ...a, piggy: 0 };
+      return await this.#saveAccount({ ...emptied, ...grantPearls(emptied, a.piggy) });
     });
   }
 

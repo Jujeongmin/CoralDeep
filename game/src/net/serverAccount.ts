@@ -43,6 +43,8 @@ export interface RemoteAccount {
   piggy: number;
   dailyClaimedDay: string;
   dailyStreak: number;
+  /** 지면별 광고 시청 기록. 서버가 쥐는 8개 지면만 들어 있다(`server.js` 의 AD_PLACEMENTS). */
+  adCounters: Record<string, { day: string; count: number; lastAt: number }>;
   /** 오늘의 무료 스핀을 쓴 날짜 키(`storage.ts` 의 `dayKey`). 빈 문자열 = 쓴 적 없음 */
   wheelFreeDay: string;
   /** 광고제거 구매 여부. **오직 `server.js` 의 `$onItemPurchased` 만 이 값을 켠다** —
@@ -138,6 +140,22 @@ function applyServerAccount(remote: RemoteAccount): void {
     s.tasksDone = [...new Set([...s.tasksDone, ...remote.tasksDone])];
     s.dailyClaimedDay = remote.dailyClaimedDay;
     s.dailyStreak = remote.dailyStreak;
+    // 광고 하루 상한은 계정에 붙어야 한다 — 안 그러면 기기를 바꿔 가며 같은 지면을
+    // 상한만큼 다시 볼 수 있다. 서버가 쥐는 8개 지면의 기록을 받아 **더 많이 본 쪽**으로
+    // 맞춘다(되돌리면 이득이 되는 값이라 max 다 — `wheelFreeDay` 와 같은 이유).
+    // 서버가 모르는 세 지면(룰렛·부활·산소)은 remote 에 없으므로 로컬 값이 그대로 남는다.
+    for (const [id, remoteCounter] of Object.entries(remote.adCounters ?? {})) {
+      const local = s.adCounters[id];
+      if (!local || remoteCounter.day > local.day) {
+        s.adCounters[id] = { ...remoteCounter };
+      } else if (remoteCounter.day === local.day) {
+        s.adCounters[id] = {
+          day: local.day,
+          count: Math.max(local.count, remoteCounter.count),
+          lastAt: Math.max(local.lastAt, remoteCounter.lastAt),
+        };
+      }
+    }
     // 무료 스핀은 **늦은 날짜가 이긴다.** 날짜 키는 `YYYY-MM-DD` 라 문자열 비교가 곧
     // 날짜 비교다. 서버 값을 그냥 덮어쓰면, 로컬에서 방금 쓰고 아직 못 올린 기록이
     // 지워져 무료 스핀이 하루에 두 번 돌아간다 — localStorage 를 지우는 것만으로도

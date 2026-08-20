@@ -427,7 +427,13 @@ as(A);
   const st = userStates.get('0xAAA') ?? (await server.getAccount());
   userStates.set('0xAAA', { ...st, piggy: 1200, pearls: 100 });
   const opened = await server.openPiggyBank();
-  check('가득 찬 저금통은 열려서 진주로 바뀐다', opened.pearls === 1300 && opened.piggy === 0, opened);
+  // 지급은 다른 곳과 같은 규칙(grantPearls)을 탄다 — 받은 1200 의 30% 인 360 이 곧바로
+  // 다시 쌓인다. `economy.ts` 의 openPiggyBank 가 addPearls 를 거치는 것과 같은 결과다.
+  check(
+    '가득 찬 저금통은 열려서 진주로 바뀐다 (30% 는 다시 쌓인다)',
+    opened.pearls === 1300 && opened.piggy === 360,
+    opened,
+  );
 }
 
 // 10) 하트 자연 회복 — 경과 시간만큼만 회복하고, 회복 뒤에는 저장하지 않아도 다시
@@ -493,6 +499,20 @@ as(A);
   const claim = await server.syncAccount({ highestUnlocked: 30, levelStars: { 9: 3 } });
   check('해금 지점을 자칭할 수 없다', claim.highestUnlocked === 3, claim.highestUnlocked);
   check('별점을 자칭할 수 없다', claim.levelStars[9] === undefined, claim.levelStars);
+}
+
+// 10.65) 저금통 — 진주를 버는 모든 길에서 30% 가 쌓인다 (economy.ts 의 addPearls 규칙)
+reset('0xAAA');
+as(A);
+{
+  const cleared = await server.reportLevelClear(1, 3);
+  check('레벨 보상 61 의 30% 인 19 가 저금통에 쌓인다', cleared.piggy === 19, cleared.piggy);
+
+  const daily = await server.claimDaily();
+  check('일일 보상도 저금통에 쌓인다', daily.piggy > cleared.piggy, { before: cleared.piggy, after: daily.piggy });
+
+  const ad = await server.claimAdReward('shop-free-coin');
+  check('광고 진주 120 의 30% 인 36 이 더 쌓인다', ad.piggy === daily.piggy + 36, ad.piggy);
 }
 
 // 10.7) 오늘의 무료 스핀 기록 — 늦은 날짜가 이긴다 (되돌리기로 스핀을 되살릴 수 없다)
