@@ -5,6 +5,7 @@ import { amount } from '../icons.ts';
 import { t, tf } from '../i18n.ts';
 import { getSave } from '../storage.ts';
 import { addStars, spendStars } from '../economy.ts';
+import { syncSoon } from '../net/serverAccount.ts';
 import { sfx } from '../audio.ts';
 import { texturePattern } from '../textures.ts';
 import { navigate } from '../router.ts';
@@ -76,6 +77,9 @@ export function renderAquarium(host: HTMLElement): void {
           ? button(t('repair'), () => {
               if (!spendStars(task.cost)) return;
               completeTask(task.id);
+              // 수족관 복원은 전용 서버 함수가 없다 — 계정에 올라가는 길이 스냅샷
+              // push 하나뿐이라, 여기서 바로 밀어 둬야 앱이 그대로 죽어도 안 사라진다.
+              syncSoon();
               sfx.star();
               toast(t('taskDone'));
               rebuild();

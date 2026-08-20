@@ -3,7 +3,7 @@
 import { el, iconButton, toast } from '../ui.ts';
 import { icon } from '../icons.ts';
 import { t, tf } from '../i18n.ts';
-import { sfx, startAmbience, stopAmbience } from '../audio.ts';
+import { duckMusic, sfx, startAmbience, stopAmbience } from '../audio.ts';
 import { haptics } from '../haptics.ts';
 import { navigate, type NavParams } from '../router.ts';
 import { depthT, getLevel, levelReward, predatorFor } from '../levels.ts';
@@ -585,8 +585,10 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
     }, 120);
   }
 
-  // 심해 앰비언트는 판에 들어와 있는 동안만 깔린다
+  // 심해 앰비언트는 판에 들어와 있는 동안만 깔린다.
+  // 그 위에 효과음까지 겹치므로 음악은 판에 있는 동안 낮춘다(끄지는 않는다).
   void startAmbience();
+  duckMusic(true);
 
   host.addEventListener(
     'screen:destroy',
@@ -595,6 +597,7 @@ export function renderLevel(host: HTMLElement, params: NavParams): void {
       window.clearTimeout(timeoutId);
       window.clearInterval(timer);
       stopAmbience();
+      duckMusic(false);
       view.destroy();
       // 아직 createStage() 가 진행 중이면(destroyed 플래그) 위 .then() 이 도착하는 대로
       // 알아서 dispose 한다 -- 여기서는 이미 붙어 있는 stage 만 해제한다.

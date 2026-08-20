@@ -214,7 +214,9 @@ export async function initServerAccount(onApplied?: () => void): Promise<void> {
     if (remote) {
       initDone = true;
       applyServerAccount(remote);
+      backfillMissingClears(remote);
       onApplied?.();
+      void flushPendingClears();
       return;
     }
     if (attempt >= BOOT_RETRY_MS.length) return; // 정말 서버가 없다 — 오프라인으로 간다
@@ -250,6 +252,28 @@ export function syncNow(): void {
 }
 
 /**
+ * 곧 올린다 — 여러 번 불러도 한 번만 나간다.
+ *
+ * `syncNow()` 는 탭을 벗어날 때만 불렀다. 그런데 **수족관 복원처럼 전용 서버 함수가
+ * 없는 변경**(`tasksDone`)은 이 스냅샷 push 말고는 계정에 올라갈 길이 없다 — 그 화면에서
+ * 바로 앱이 죽거나(웹뷰 정리) pagehide 가 안 오면 그대로 사라졌다. 실제로 "수족관
+ * 업그레이드가 저장이 안 된다"로 나왔다.
+ *
+ * 그래서 그런 변경 직후에 이걸 부른다. 2초 모으는 이유는 복원을 연달아 누를 때 호출이
+ * 그 수만큼 나가지 않게 하기 위해서다.
+ */
+const SYNC_SOON_MS = 2000;
+let syncSoonTimer: number | null = null;
+
+export function syncSoon(): void {
+  if (syncSoonTimer !== null) return;
+  syncSoonTimer = window.setTimeout(() => {
+    syncSoonTimer = null;
+    syncNow();
+  }, SYNC_SOON_MS);
+}
+
+/**
  * 서버 계정을 로컬 스냅샷 없이 그냥 다시 읽어 반영한다.
  *
  * `syncAccount` 와 달리 로컬이 알고 있던 것을 실어 보내지 않는다 — **서버에서 방금
@@ -276,6 +300,39 @@ export function reportLevelClearRemote(levelId: number, stars: number): void {
     s.pendingClears = [...s.pendingClears, { levelId, stars }];
   });
   void flushPendingClears();
+}
+
+/**
+ * 이 기기는 깼는데 계정에는 없는 판을 큐에 넣는다.
+ *
+ * 큐(`pendingClears`)는 이번에 생긴 장치라, 그 전에 보고가 빠진 판은 아무 데도 안 남아
+ * 있다 — 로컬 저장에 별점만 남고 계정에는 그 레벨 자체가 없다. 실제로 그 상태가
+ * "PC 에서는 3단계가 깨져 있는데 폰에서는 안 깨져 있다"로 나왔다(4단계는 큐가 생긴 뒤라
+ * 올라갔다). 계정 값을 받은 직후에 로컬과 대조해 빠진 것만 다시 보고한다.
+ *
+ * **로컬이 더 높은 별점인 경우도 포함한다** — 같은 판을 더 잘 깬 기록도 계정에 없으면
+ * 올라가야 한다. 반대(계정이 더 높음)는 applyServerAccount 가 이미 로컬에 반영했다.
+ */
+function backfillMissingClears(remote: RemoteAccount): void {
+  const local = getSave().levelStars;
+  const missing: { levelId: number; stars: number }[] = [];
+  for (const [id, stars] of Object.entries(local)) {
+    const levelId = Number(id);
+    if (!Number.isFinite(levelId) || stars <= 0) continue;
+    if ((remote.levelStars[levelId] ?? 0) >= stars) continue;
+    missing.push({ levelId, stars });
+  }
+  if (missing.length === 0) return;
+  // 레벨 순서대로 보낸다 — 서버 진행도는 누적이라 중간이 빈 채로 뒤엣것만 올라가면
+  // 해금 지점만 뛴다(flushPendingClears 의 같은 이유).
+  missing.sort((a, b) => a.levelId - b.levelId);
+  mutateSave((s) => {
+    const queued = new Set(s.pendingClears.map((c) => `${c.levelId}:${c.stars}`));
+    s.pendingClears = [
+      ...s.pendingClears,
+      ...missing.filter((m) => !queued.has(`${m.levelId}:${m.stars}`)),
+    ];
+  });
 }
 
 /**

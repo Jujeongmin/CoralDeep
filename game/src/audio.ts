@@ -262,6 +262,39 @@ const MUSIC_GAIN = 0.22;
 const MUSIC_FADE_SECONDS = 3;
 
 /**
+ * 판 안에서 음악을 낮추는 비율.
+ *
+ * 판에서는 물소리 앰비언트가 음악 위에 겹치고, 그 위에 매치·특수타일 효과음이 계속
+ * 터진다 — 지도에서 알맞던 음량이 여기서는 시끄럽다. 끄지는 않는다: 음악이 사라지면
+ * 판만 다른 게임처럼 들린다.
+ */
+const MUSIC_DUCK = 0.45;
+/** 낮추고 되돌리는 데 걸리는 시간(초). 화면 전환과 같이 느껴질 만큼만 짧게. */
+const MUSIC_DUCK_FADE = 0.8;
+
+/** 지금 낮춰져 있는가 — 음악이 나중에 시작돼도 같은 크기로 붙어야 한다. */
+let musicDucked = false;
+
+/** 음악 목표 음량. 판 안이면 낮춘 값. */
+function musicTarget(): number {
+  return musicDucked ? MUSIC_GAIN * MUSIC_DUCK : MUSIC_GAIN;
+}
+
+/**
+ * 판에 들어가고 나올 때 부른다. 음악만 낮춘다 — 앰비언트와 효과음은 그대로다.
+ * 음악이 아직 안 시작했어도 상태만 기억해 두고, 시작할 때 그 크기로 붙는다.
+ */
+export function duckMusic(on: boolean): void {
+  if (musicDucked === on) return;
+  musicDucked = on;
+  const ac = ctx;
+  if (!ac || !musicGain) return;
+  musicGain.gain.cancelScheduledValues(ac.currentTime);
+  musicGain.gain.setValueAtTime(musicGain.gain.value, ac.currentTime);
+  musicGain.gain.linearRampToValueAtTime(musicTarget(), ac.currentTime + MUSIC_DUCK_FADE);
+}
+
+/**
  * 배경 음악을 깐다. 앱이 살아 있는 동안 계속 돈다 — 화면을 옮겨도 안 끊는다.
  * 여러 번 불러도 이미 돌고 있으면 아무 일도 안 한다.
  */
@@ -287,7 +320,7 @@ export async function startMusic(): Promise<void> {
   musicSource.loop = true;
   musicGain = ac.createGain();
   musicGain.gain.setValueAtTime(0.0001, ac.currentTime);
-  musicGain.gain.linearRampToValueAtTime(MUSIC_GAIN, ac.currentTime + MUSIC_FADE_SECONDS);
+  musicGain.gain.linearRampToValueAtTime(musicTarget(), ac.currentTime + MUSIC_FADE_SECONDS);
   musicSource.connect(musicGain).connect(bgmBus);
   musicSource.start();
 }
