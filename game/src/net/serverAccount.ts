@@ -97,14 +97,6 @@ function connect(): Promise<boolean> {
   return connectPromise;
 }
 
-/** 지금 서버에 붙어 있는가 (진단 표시용). */
-export function isOnline(): boolean {
-  try {
-    return GameServer.getInstance().connected === true;
-  } catch {
-    return false;
-  }
-}
 
 async function call<T>(fn: string, args: unknown[] = []): Promise<T | null> {
   try {
@@ -317,18 +309,6 @@ export async function flushPendingClears(): Promise<void> {
   }
 }
 
-/** 계정 서버 상태 요약 (설정 화면의 진단 줄). */
-export function netDiagnostics(): {
-  online: boolean;
-  account: string | null;
-  pending: number;
-} {
-  return {
-    online: isOnline(),
-    account: getSave().accountId,
-    pending: getSave().pendingClears.length,
-  };
-}
 
 /**
  * 일일 보상. `economy.ts` 의 `claimDaily` 가 로컬을 이미 반영한 뒤 부른다.

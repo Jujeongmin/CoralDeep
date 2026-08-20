@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { sampleAnimFrame, unpackAnimFrames } from './bakedAnim.ts';
 import { depthScale } from './depthProjection.ts';
 import { type GlbAnim, parseGlb } from './glb.ts';
+import { glbBuffer } from './glbCache.ts';
 import { type PlaneView, pxToWorld, screenToPlane } from './projection.ts';
 import type { DescentPoint } from './types.ts';
 
@@ -209,8 +210,9 @@ export class Diver {
   }
 
   async load(): Promise<void> {
-    const res = await fetch(diverUrl);
-    const mesh = parseGlb(await res.arrayBuffer());
+    // 바이트는 앱을 켤 때 이미 받아 뒀다(boot.ts -> glbCache). 여기서는 캐시에서
+    // 꺼내 파싱만 한다 — 첫 판에서 로딩을 기다리던 구간이 이 캐시로 사라진다.
+    const mesh = parseGlb(await glbBuffer(diverUrl));
     if (this.disposed) return;
     const g = new THREE.BufferGeometry();
     const hasAnim = !!mesh.anims && mesh.anims.length > 0;

@@ -23,6 +23,7 @@ type Dict = Record<string, string>;
 const KO: Dict = {
   title: 'Coral Deep',
   subtitle: '심해 수족관 복원',
+  bootLoading: '심해로 내려가는 중…',
   play: '플레이',
   levelN: '{n} 단계',
   start: '시작',
@@ -180,12 +181,6 @@ const KO: Dict = {
   boosterPrePearlDesc: '맞바꾼 색 타일이 보드에서 전부 사라지는 타일',
   owned: '보유 {n}',
   bgmVolume: '배경음',
-  saveStatus: '저장 상태',
-  saveServer: '계정',
-  saveDevice: '기기',
-  saveOn: '연결됨',
-  saveOff: '안 됨',
-  savePending: '못 올린 판 {n}개',
   sfxVolume: '효과음',
   tapTarget: '사용할 칸을 고르세요',
 
@@ -196,6 +191,7 @@ const KO: Dict = {
 const EN: Dict = {
   title: 'Coral Deep',
   subtitle: 'Restore the deep-sea aquarium',
+  bootLoading: 'Diving down…',
   play: 'Play',
   levelN: 'Level {n}',
   start: 'Start',
@@ -342,12 +338,6 @@ const EN: Dict = {
   boosterPrePearlDesc: 'A tile that clears every tile of the colour you swap it with',
   owned: 'Owned {n}',
   bgmVolume: 'Music',
-  saveStatus: 'Save status',
-  saveServer: 'Account',
-  saveDevice: 'Device',
-  saveOn: 'OK',
-  saveOff: 'Not working',
-  savePending: '{n} unsent clears',
   sfxVolume: 'Sound effects',
   tapTarget: 'Pick a tile',
 
@@ -358,6 +348,7 @@ const EN: Dict = {
 const JA: Dict = {
   title: 'Coral Deep',
   subtitle: '深海水族館の復元',
+  bootLoading: '深海へ潜航中…',
   play: 'プレイ',
   levelN: 'レベル {n}',
   start: 'スタート',
@@ -504,12 +495,6 @@ const JA: Dict = {
   boosterPrePearlDesc: '入れ替えた色のタイルが盤面から全て消えるタイル',
   owned: '所持 {n}',
   bgmVolume: 'BGM',
-  saveStatus: 'セーブ状態',
-  saveServer: 'アカウント',
-  saveDevice: '端末',
-  saveOn: '接続済み',
-  saveOff: '不可',
-  savePending: '未送信 {n} 件',
   sfxVolume: '効果音',
   tapTarget: '使うマスを選んでください',
 
@@ -520,6 +505,7 @@ const JA: Dict = {
 const ZH: Dict = {
   title: 'Coral Deep',
   subtitle: '深海水族館修復',
+  bootLoading: '正在潛入深海…',
   play: '開始遊戲',
   levelN: '第 {n} 關',
   start: '開始',
@@ -666,12 +652,6 @@ const ZH: Dict = {
   boosterPrePearlDesc: '與它交換的顏色磚塊會全部從盤面消失',
   owned: '持有 {n}',
   bgmVolume: '背景音樂',
-  saveStatus: '儲存狀態',
-  saveServer: '帳號',
-  saveDevice: '裝置',
-  saveOn: '已連線',
-  saveOff: '無法使用',
-  savePending: '未上傳 {n} 關',
   sfxVolume: '音效',
   tapTarget: '請選擇要使用的格子',
 

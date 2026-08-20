@@ -4,9 +4,9 @@ import { adButton, button, cn, el, iconButton, openModal, toast, watchRewarded }
 import { amount, icon, type IconName } from '../icons.ts';
 import { LANGS, LANG_LABEL, formatDuration, predatorLabel, t, tf } from '../i18n.ts';
 import { depthT, predatorFor, type PredatorKind } from '../levels.ts';
-import { getSave, hasNoAds, hasStoredSave, mutateSave, type BoosterId } from '../storage.ts';
+import { getSave, hasNoAds, mutateSave, type BoosterId } from '../storage.ts';
 import { buyRemoveAds, isRemoveAdsPurchasable, vxRemoveAdsPrice, watchVxShop } from '../net/vx.ts';
-import { flushPendingClears, netDiagnostics, refreshAccountRemote } from '../net/serverAccount.ts';
+import { refreshAccountRemote } from '../net/serverAccount.ts';
 import {
   BOOSTER_PRICE,
   DAILY_REWARDS,
@@ -680,12 +680,6 @@ export function openSettingsModal(refresh: Refresh): void {
             }),
           ),
         ),
-        // 저장 상태 한 줄.
-        //
-        // "저장이 안 된다"는 신고가 들어와도 화면에는 아무 단서가 없었다 — 계정에
-        // 붙었는지, 이 기기에 저장이 되는지, 아직 못 올린 판이 있는지가 전부 콘솔에만
-        // 있었고 모바일 웹뷰에서는 그걸 볼 방법이 없다. 세 가지를 한 줄로 적는다.
-        saveStatusRow(),
       );
     };
 
@@ -694,35 +688,6 @@ export function openSettingsModal(refresh: Refresh): void {
   });
 }
 
-/** 계정·저장 진단 한 줄. 값이 아니라 **상태**를 적는다 — 누르면 지금 다시 시도한다. */
-function saveStatusRow(): HTMLElement {
-  const net = netDiagnostics();
-  const parts = [
-    `${t('saveServer')}: ${net.online ? t('saveOn') : t('saveOff')}`,
-    `${t('saveDevice')}: ${hasStoredSave() ? t('saveOn') : t('saveOff')}`,
-  ];
-  if (net.pending > 0) parts.push(tf('savePending', { n: net.pending }));
-
-  const line = el('small', { class: 'save-status-line', text: parts.join(' · ') });
-  const row = el(
-    'div',
-    { class: 'setting-row setting-row-diag' },
-    el('span', { text: t('saveStatus') }),
-    el('div', { class: 'save-status' }, line, el('small', { class: 'save-status-id', text: net.account ?? 'guest' })),
-  );
-
-  row.addEventListener('click', () => {
-    sfx.tap();
-    void flushPendingClears().then(() => {
-      const now = netDiagnostics();
-      line.textContent =
-        `${t('saveServer')}: ${now.online ? t('saveOn') : t('saveOff')} · ` +
-        `${t('saveDevice')}: ${hasStoredSave() ? t('saveOn') : t('saveOff')}` +
-        (now.pending > 0 ? ` · ${tf('savePending', { n: now.pending })}` : '');
-    });
-  });
-  return row;
-}
 
 // ---------- 레벨 시작 전 부스터 ----------
 

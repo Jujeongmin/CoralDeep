@@ -41,6 +41,7 @@ import * as THREE from 'three';
 
 import { sampleAnimFrame, unpackAnimFrames } from './bakedAnim.ts';
 import { type GlbAnim, type GlbMesh, parseGlb } from './glb.ts';
+import { glbBuffer } from './glbCache.ts';
 import type { DepthMood } from '../render/depth.ts';
 import type { PredatorKind } from '../levels.ts';
 
@@ -232,8 +233,8 @@ export class Predators {
   }
 
   async load(): Promise<void> {
-    const res = await fetch(this.config.url);
-    const mesh: GlbMesh = parseGlb(await res.arrayBuffer());
+    // diver.ts 와 같다 — 바이트는 부팅 때 받아 둔 캐시에서 꺼낸다.
+    const mesh: GlbMesh = parseGlb(await glbBuffer(this.config.url));
     if (this.disposed) return;
 
     const g = new THREE.BufferGeometry();

@@ -1535,30 +1535,43 @@ body {
   flex: 1;
 }
 
-/* 설정의 저장 상태 줄 — 값이 아니라 상태를 읽는 자리라 작고 낮은 대비로 둔다.
-   누르면 밀린 판을 다시 올려 보므로 손가락이 닿는 것을 알려야 한다. */
-.setting-row-diag {
-  cursor: pointer;
-  align-items: flex-start;
-}
-
-.save-status {
+/* 부팅 로딩 — 지도가 뜨기 전까지 이 화면만 보인다. 판 안의 .level-loading 과 같은
+   부품(스피너)을 쓰되, 이쪽은 배경을 완전히 덮는다(뒤에 아직 아무것도 없다). */
+.boot-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  text-align: right;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: linear-gradient(180deg, #07202c 0%, #04121a 60%, #020a10 100%);
+  transition: opacity 0.24s ease;
 }
 
-.save-status-line {
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
+.boot-loading.out {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.save-status-id {
+.boot-loading p {
+  margin: 0;
   color: var(--text-dim);
-  opacity: 0.6;
-  font-size: 10px;
-  word-break: break-all;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.boot-brand h1 {
+  margin: 0;
+  padding: 4px 12px 3px;
+  border: 1px solid var(--brass-deep);
+  border-radius: 2px;
+  background: linear-gradient(180deg, #e8b348, var(--brass) 40%, #a97516);
+  color: #2a1a03;
+  font-family: var(--font-plate);
+  font-size: 18px;
+  letter-spacing: 0.06em;
 }
 
 .heart-row {

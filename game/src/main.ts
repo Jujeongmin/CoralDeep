@@ -18,6 +18,7 @@ import { renderLevel } from './screens/level.ts';
 import { refreshHearts } from './economy.ts';
 import { startMusic, unlockAudio } from './audio.ts';
 import { flushPendingClears, initServerAccount, syncNow } from './net/serverAccount.ts';
+import { runBootTasks, showBootLoader } from './boot.ts';
 import { initVxShop } from './net/vx.ts';
 
 /**
@@ -64,11 +65,11 @@ async function boot(): Promise<void> {
   // loadSave() 로 준비됐으므로, 접속이 느리거나 서버가 없어도(배포 전, 오프라인)
   // 첫 화면 진입을 막지 않는다. 서버 값이 오면 그때 로컬을 계정 값으로 맞춘다.
   //
-  // 계정 값이 도착하면 지금 화면을 다시 그린다. 지도는 이미 로컬 값으로 떠 있는데,
-  // 저장소가 막힌 기기에서는 그 값이 빈 상태라 계정에 있는 진행도가 화면에 안 나타난다
-  // — 다시 그려야 그때 열린 단계까지 보인다. 판을 푸는 중에는 reloadScreen 이 알아서
-  // 지도로 되돌리는 대신 진행을 버리므로, 지도/수족관에 있을 때만 다시 그린다.
-  void initServerAccount(() => {
+  // 계정 값이 도착하면 지금 화면을 다시 그린다. 로딩이 상한(BOOT_TIMEOUT_MS)에 걸려
+  // 먼저 들어간 경우에 이 콜백이 뒤늦게 값을 채운다 — 지도는 이미 떠 있고, 저장소가
+  // 막힌 기기에서는 그 값이 빈 상태라 계정 진행도가 화면에 안 나타난다. 판을 푸는
+  // 중에는 다시 그리면 진행이 날아가므로 지도/수족관에 있을 때만 그린다.
+  const accountReady = initServerAccount(() => {
     const screen = currentScreen();
     if (screen === 'map' || screen === 'aquarium') reloadScreen();
   });
@@ -83,6 +84,14 @@ async function boot(): Promise<void> {
   registerScreen('map', renderMap);
   registerScreen('aquarium', renderAquarium);
   registerScreen('level', renderLevel);
+
+  // 로딩은 **앱을 켤 때** 한다. 계정 저장을 불러오고 3D 에셋 바이트를 받아 두는 동안
+  // 로딩 화면을 띄우고, 끝나면 지도로 들어간다 — 그 뒤로는 어느 단계를 눌러도 기다림이
+  // 없다. 예전에는 이 기다림이 단계를 누른 직후에 있었다(가장 나쁜 자리다).
+  const loader = showBootLoader(app);
+  await runBootTasks(accountReady);
+  loader.done();
+
   navigate('map');
 
   // 개발 환경 전용 디버그 훅 (프로덕션 번들에서는 통째로 제거된다)
