@@ -43,6 +43,8 @@ export interface RemoteAccount {
   piggy: number;
   dailyClaimedDay: string;
   dailyStreak: number;
+  /** 오늘의 무료 스핀을 쓴 날짜 키(`storage.ts` 의 `dayKey`). 빈 문자열 = 쓴 적 없음 */
+  wheelFreeDay: string;
   /** 광고제거 구매 여부. **오직 `server.js` 의 `$onItemPurchased` 만 이 값을 켠다** —
    * 클라이언트가 자칭할 수 있는 자리가 없다(`syncAccount` 의 patch 화이트리스트에도 없다). */
   noAds: boolean;
@@ -113,6 +115,11 @@ function applyServerAccount(remote: RemoteAccount): void {
     s.tasksDone = [...new Set([...s.tasksDone, ...remote.tasksDone])];
     s.dailyClaimedDay = remote.dailyClaimedDay;
     s.dailyStreak = remote.dailyStreak;
+    // 무료 스핀은 **늦은 날짜가 이긴다.** 날짜 키는 `YYYY-MM-DD` 라 문자열 비교가 곧
+    // 날짜 비교다. 서버 값을 그냥 덮어쓰면, 로컬에서 방금 쓰고 아직 못 올린 기록이
+    // 지워져 무료 스핀이 하루에 두 번 돌아간다 — localStorage 를 지우는 것만으로도
+    // 마찬가지가 된다. 반대로 로컬만 믿으면 다른 기기에서 쓴 것이 안 넘어온다.
+    if (remote.wheelFreeDay > s.wheelFreeDay) s.wheelFreeDay = remote.wheelFreeDay;
     // 한 번 켜지면 끄는 함수가 없다 — 서버도 `noAds` 를 내리는 경로가 없으므로
     // (§ server.js `$onItemPurchased`), 여기서도 그대로 옮겨 적기만 한다.
     s.noAds = remote.noAds;
@@ -136,6 +143,10 @@ function snapshotForSync(): Record<string, unknown> {
     levelStars: s.levelStars,
     highestUnlocked: s.highestUnlocked,
     piggy: s.piggy,
+    // 이 기기에서 오늘 무료 스핀을 썼다는 사실. 서버는 이 값을 그대로 받아 두고
+    // (`server.js` 의 pickClientPatch 화이트리스트에 이미 있다) 다음 부팅 때
+    // applyServerAccount 가 늦은 날짜 쪽으로 맞춘다.
+    wheelFreeDay: s.wheelFreeDay,
   };
 }
 

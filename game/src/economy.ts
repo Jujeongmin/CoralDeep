@@ -318,7 +318,17 @@ export function recordLevelClear(levelId: number, stars: number, save: SaveData 
 
 // ---- 하트 풀 충전 (진주 결제) ----
 
+/**
+ * 진주로 하트 풀을 채운다.
+ *
+ * **이미 가득 찼으면 아무것도 팔지 않는다.** 채울 칸이 없는데 결제만 되면 진주 500 이
+ * 사라지고 화면은 그대로다 — 사용자 눈에는 돈만 먹은 고장이다. 화면(하트 모달)도
+ * 이 경우 버튼을 비활성으로 그리지만, 여기서도 막아 둔다: 파는 자리가 하나뿐이라도
+ * 결제를 실제로 수행하는 곳은 여기라, 판단을 화면에만 맡기면 호출 경로가 하나 늘 때
+ * 같은 구멍이 다시 열린다.
+ */
 export function buyHeartRefill(price: number, now: number = Date.now()): boolean {
+  if (getSave().hearts >= MAX_HEARTS) return false;
   if (!spendPearls(price)) return false;
   fillHearts(now);
   buyHeartRefillRemote();

@@ -47,10 +47,21 @@ function modalHeader(title: string, close: () => void): HTMLElement {
   );
 }
 
-/** 가격 라벨: 아이콘 + 숫자 */
-function priceButton(cost: number, onClick: () => void): HTMLButtonElement {
-  const btn = el('button', { class: 'btn btn-buy' }, amount('pearl', cost, 16));
+/** 가격 라벨: 아이콘 + 숫자. 살 수 없는 상태면 가격 대신 이유를 적고 비활성으로 둔다. */
+function priceButton(
+  cost: number,
+  onClick: () => void,
+  opts: { disabled?: boolean; disabledLabel?: string } = {},
+): HTMLButtonElement {
+  const btn = el(
+    'button',
+    { class: 'btn btn-buy', disabled: opts.disabled ? 'disabled' : undefined },
+    opts.disabled && opts.disabledLabel
+      ? el('span', { text: opts.disabledLabel })
+      : amount('pearl', cost, 16),
+  );
   btn.addEventListener('click', () => {
+    if (btn.disabled) return;
     sfx.tap();
     onClick();
   });
@@ -108,14 +119,24 @@ export function openHeartsModal(refresh: Refresh): void {
         { class: 'buy-row' },
         el('span', { class: 'buy-label', text: t('refillHearts') }),
         // 상점의 하트 상품과 **같은 가격**이어야 한다. 같은 물건이 두 가격이면 싼 쪽만 팔린다.
-        priceButton(HEART_REFILL_PRICE, () => {
-          if (!buyHeartRefill(HEART_REFILL_PRICE)) {
-            toast(t('notEnoughPearls'), 'warn');
-            return;
-          }
-          sfx.coin();
-          done();
-        }),
+        //
+        // 이미 가득 찼으면 팔지 않는다 — 채울 칸이 없는데 결제만 되면 진주 500 이
+        // 사라지고 화면은 그대로다. 무한 하트가 도는 동안에도 같다(살 이유가 없다).
+        priceButton(
+          HEART_REFILL_PRICE,
+          () => {
+            if (!buyHeartRefill(HEART_REFILL_PRICE)) {
+              toast(t('notEnoughPearls'), 'warn');
+              return;
+            }
+            sfx.coin();
+            done();
+          },
+          {
+            disabled: state.infinite || state.hearts >= MAX_HEARTS,
+            disabledLabel: t('heartFull'),
+          },
+        ),
       ),
     );
 

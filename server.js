@@ -474,7 +474,13 @@ class Server {
         tasksDone: Array.isArray(p.tasksDone)
           ? [...new Set([...server.tasksDone, ...p.tasksDone.filter((t) => typeof t === 'string')])]
           : server.tasksDone,
-        wheelFreeDay: typeof p.wheelFreeDay === 'string' ? p.wheelFreeDay : server.wheelFreeDay,
+        // 무료 스핀 기록은 **늦은 날짜가 이긴다** (날짜 키가 `YYYY-MM-DD` 라 문자열
+        // 비교가 곧 날짜 비교다). 클라이언트를 그대로 믿으면 빈 문자열을 보내는 것만으로
+        // 오늘의 무료 스핀이 되살아난다 — 광고 카운터를 max 로 받는 것과 같은 이유다.
+        wheelFreeDay:
+          typeof p.wheelFreeDay === 'string' && p.wheelFreeDay > server.wheelFreeDay
+            ? p.wheelFreeDay
+            : server.wheelFreeDay,
         // 광고 카운터·일일 보상 기록은 전용 함수만 쓴다 — 여기서는 아예 안 받는다
         // (patch 에 있어도 무시). 받으면 재동기화 한 번으로 쿨다운·하루 상한이 초기화된다.
       };
@@ -665,12 +671,17 @@ class Server {
   async buyHeartRefill() {
     return await $lock(`acct:${$sender.account}`, async () => {
       const a = await this.#loadAccount();
-      if (a.pearls < HEART_REFILL_PRICE) throw new Error('not_enough_pearls');
+      // 채울 칸이 없으면 팔지 않는다 (`economy.ts` 의 buyHeartRefill 과 같은 규칙) —
+      // 여기서 안 막으면 조작된 클라이언트가 아니라 그냥 화면이 한 박자 늦은 경우에도
+      // 진주만 빠진다. 회복분을 먼저 반영한 뒤에 본다.
+      const cur = withHeartRegen(a, Date.now());
+      if (cur.hearts >= MAX_HEARTS) throw new Error('hearts_full');
+      if (cur.pearls < HEART_REFILL_PRICE) throw new Error('not_enough_pearls');
       return await this.#saveAccount({
-        ...a,
-        pearls: a.pearls - HEART_REFILL_PRICE,
+        ...cur,
+        pearls: cur.pearls - HEART_REFILL_PRICE,
         // 이미 상한을 넘겨 들고 있으면 깎지 않는다 (`economy.ts` 의 `fillHearts` 와 같은 규칙).
-        hearts: Math.max(a.hearts, MAX_HEARTS),
+        hearts: Math.max(cur.hearts, MAX_HEARTS),
         heartsAt: Date.now(),
       });
     });

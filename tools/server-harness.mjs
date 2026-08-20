@@ -402,6 +402,9 @@ as(B);
   const refilled = await server.buyHeartRefill();
   check('하트 리필: 500 - 500 = 0, 하트 5/5', refilled.pearls === 0 && refilled.hearts === 5, refilled);
 
+  // 잔액 검사를 보려면 하트를 다시 깎아 둬야 한다 — 가득 찬 상태면 잔액을 보기 전에
+  // hearts_full 로 먼저 걸린다.
+  userStates.set('0xBBB', { ...userStates.get('0xBBB'), hearts: 1, heartsAt: Date.now() });
   let err = null;
   try {
     await server.buyHeartRefill();
@@ -463,9 +466,27 @@ as(A);
   const rewarded = await server.claimAdReward('refill-hearts');
   check('가득 찬 상태에서 광고로 받으면 6개가 된다', rewarded.hearts === 6, rewarded.hearts);
 
+  // 채울 칸이 없으면 풀 충전을 아예 안 판다 — 결제만 되고 하트는 그대로면 진주만 사라진다.
   userStates.set('0xAAA', { ...rewarded, pearls: 500 });
-  const refilled = await server.buyHeartRefill();
-  check('풀 충전은 넘겨 든 하트를 깎지 않는다', refilled.hearts === 6, refilled.hearts);
+  let fullErr = null;
+  try {
+    await server.buyHeartRefill();
+  } catch (e) {
+    fullErr = e.message;
+  }
+  check('가득 차 있으면 풀 충전을 거부한다', fullErr === 'hearts_full', fullErr);
+  check('거부됐으면 진주도 그대로다', userStates.get('0xAAA').pearls === 500, userStates.get('0xAAA').pearls);
+}
+
+// 10.7) 오늘의 무료 스핀 기록 — 늦은 날짜가 이긴다 (되돌리기로 스핀을 되살릴 수 없다)
+reset('0xAAA');
+as(A);
+{
+  await server.syncAccount({ wheelFreeDay: '2026-08-20' });
+  const kept = await server.syncAccount({ wheelFreeDay: '' });
+  check('빈 값으로는 무료 스핀을 되살릴 수 없다', kept.wheelFreeDay === '2026-08-20', kept.wheelFreeDay);
+  const moved = await server.syncAccount({ wheelFreeDay: '2026-08-21' });
+  check('다음 날 기록은 그대로 올라간다', moved.wheelFreeDay === '2026-08-21', moved.wheelFreeDay);
 }
 
 // 11) 손으로 고친 계정은 정규화된다
