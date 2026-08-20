@@ -22,7 +22,7 @@
 // server-persistence-report.md 참고.
 
 import { GameServer } from '@agent8/gameserver';
-import { getSave, mutateSave, type BoosterId } from '../storage.ts';
+import { getSave, hasStoredSave, mutateSave, type BoosterId } from '../storage.ts';
 import type { PlacementId } from '../adPolicy.ts';
 
 /** `server.js` 의 `normalizeAccount` 가 돌려주는 모양. 서버가 쥔 필드만 있다 —
@@ -110,7 +110,14 @@ function applyServerAccount(remote: RemoteAccount): void {
     s.infiniteHeartsUntil = remote.infiniteHeartsUntil;
     s.piggy = remote.piggy;
     s.boosters = { ...s.boosters, ...remote.boosters };
-    s.levelStars = { ...s.levelStars, ...remote.levelStars };
+    // 레벨 별점은 **칸마다 높은 쪽**을 남긴다. 서버 값으로 그냥 덮으면, 방금 깬 판이
+    // 아직 서버에 안 올라간 사이에 온 응답 하나가 그 별점을 지운다 — 화면에서는
+    // "깬 게 저장이 안 된다"로 보인다. 진행도(highestUnlocked)를 max 로 두는 것과 같은 규칙.
+    s.levelStars = { ...remote.levelStars, ...s.levelStars };
+    for (const [id, stars] of Object.entries(remote.levelStars)) {
+      const key = Number(id);
+      s.levelStars[key] = Math.max(s.levelStars[key] ?? 0, stars);
+    }
     s.highestUnlocked = Math.max(s.highestUnlocked, remote.highestUnlocked);
     s.tasksDone = [...new Set([...s.tasksDone, ...remote.tasksDone])];
     s.dailyClaimedDay = remote.dailyClaimedDay;
@@ -165,14 +172,33 @@ let initDone = false;
 export async function initServerAccount(): Promise<void> {
   if (initDone) return;
   initDone = true;
-  const remote = await call<RemoteAccount>('syncAccount', [snapshotForSync()]);
+  const remote = await pushOrPull();
   if (remote) applyServerAccount(remote);
+}
+
+/**
+ * 로컬 스냅샷을 올릴지, 서버 값을 받아만 올지 고른다.
+ *
+ * **저장된 기록 없이 시작한 세션은 아무것도 올리지 않는다.** 그 세션의 로컬 값은 방금
+ * 만든 기본값(진행도 0, 진주 300)이라 계정에 올릴 자격이 없다 — `syncAccount` 는
+ * 화폐성 필드를 `min(서버, 클라이언트)` 로 받으므로, 기본값을 한 번 올리는 것만으로
+ * 계정이 그 바닥값으로 깎인다. localStorage 가 막히는 환경(사파리 프라이빗 모드,
+ * iframe 저장소 분리)에서는 매 세션이 그 상태라, 실제 증상이 "깬 판이 저장이 안 된다"
+ * 였다: 판마다 서버에 올라간 진행도를 다음 부팅이 다시 0 으로 끌어내렸다.
+ *
+ * 그런 세션에서는 `getAccount` 로 서버 값을 받아 오기만 한다 — 그러면 저장소가 막힌
+ * 기기에서도 계정 진행도로 계속 이어서 플레이할 수 있다(TowerWar 가 "붙어 있으면
+ * 서버가 진짜"로 두는 것과 같은 자리다).
+ */
+function pushOrPull(): Promise<RemoteAccount | null> {
+  if (!hasStoredSave()) return call<RemoteAccount>('getAccount', []);
+  return call<RemoteAccount>('syncAccount', [snapshotForSync()]);
 }
 
 /** 탭을 벗어나기 직전 등, 로컬에 쌓인 소비(부스터·하트 사용, 태스크 완료)를 최선노력으로
  * 계정에 반영한다. 실패해도 다음 기회에 다시 보내면 된다. */
 export function syncNow(): void {
-  void call<RemoteAccount>('syncAccount', [snapshotForSync()]).then((remote) => {
+  void pushOrPull().then((remote) => {
     if (remote) applyServerAccount(remote);
   });
 }

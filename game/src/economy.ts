@@ -1,7 +1,7 @@
 // 하트 · 진주 · 부스터 경제 규칙.
 
 import type { BoosterId, SaveData } from './storage.ts';
-import { dayKey, getSave, mutateSave } from './storage.ts';
+import { dayKey, flushSave, getSave, mutateSave } from './storage.ts';
 import {
   buyBoosterRemote,
   buyHeartRefillRemote,
@@ -307,6 +307,10 @@ export function recordLevelClear(levelId: number, stars: number, save: SaveData 
     s.highestUnlocked = Math.max(s.highestUnlocked, levelId + 1);
     s.stars += gainedStars;
   });
+  // 판을 깬 것은 **즉시** 디스크에 쓴다. 보통의 변경은 250ms 디바운스로 묶지만,
+  // 클리어 직후는 사용자가 승리 모달을 보고 앱을 나가거나 웹뷰가 정리될 수 있는
+  // 자리라 그 250ms 안에 창이 사라지면 방금 깬 판이 통째로 없어진다.
+  void flushSave();
   // 보상 진주는 호출부(screens/level.ts)가 levelReward(levelId, stars) 로 따로 계산해
   // addPearls 한다 — 계정 서버도 같은 공식으로 스스로 계산하므로(server.js 의
   // reportLevelClear) 여기서는 levelId/stars 만 알리면 된다. 승패 자체(보드를 정말

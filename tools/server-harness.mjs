@@ -178,14 +178,6 @@ await server.syncAccount({ pearls: 0 });
   check('다음 레벨이 열린다', r1.highestUnlocked === 2, r1.highestUnlocked);
   check('처음 깬 별만큼 stars 재화가 오른다', r1.stars === 3, r1.stars);
 
-  let err = null;
-  try {
-    await server.reportLevelClear(5, 3);
-  } catch (e) {
-    err = e.message;
-  }
-  check('아직 안 열린 레벨은 거부한다 (level_locked)', err === 'level_locked', err);
-
   const replay = await server.reportLevelClear(1, 3);
   check('같은 별점으로 재도전하면 stars 재화가 또 안 오른다', replay.stars === 3, replay.stars);
   check('재도전해도 코인은 다시 나온다 (승패 검증은 못 하므로)', replay.pearls === 61 + 61, replay.pearls);
@@ -193,6 +185,12 @@ await server.syncAccount({ pearls: 0 });
   const better = await server.reportLevelClear(2, 2);
   check('2레벨 2별 보상 = 30 + 3 + 15 = 48', better.pearls === 61 + 61 + 48, better.pearls);
   check('3레벨까지 열린다', better.highestUnlocked === 3, better.highestUnlocked);
+
+  // 보고가 한 번 빠져도(오프라인) 그 다음 판이 막히지 않는다 — 해금 지점을 앞서는
+  // 보고를 거절하면 서버 진행도가 영영 못 따라잡는다.
+  const ahead = await server.reportLevelClear(7, 1);
+  check('해금 지점을 앞선 보고도 받아 진행도를 맞춘다', ahead.highestUnlocked === 8, ahead.highestUnlocked);
+  check('그 레벨의 별점도 기록된다', ahead.levelStars[7] === 1, ahead.levelStars);
 }
 
 // 5) claimDaily — 스트릭·요일은 서버 시계(UTC)로 판정한다
@@ -476,6 +474,25 @@ as(A);
   }
   check('가득 차 있으면 풀 충전을 거부한다', fullErr === 'hearts_full', fullErr);
   check('거부됐으면 진주도 그대로다', userStates.get('0xAAA').pearls === 500, userStates.get('0xAAA').pearls);
+}
+
+// 10.6) 빈 로컬 스냅샷이 계정 진행도를 깎지 못한다
+reset('0xAAA');
+as(A);
+{
+  await server.reportLevelClear(1, 3);
+  const before = await server.reportLevelClear(2, 3);
+  check('두 판을 깨서 3레벨까지 열렸다', before.highestUnlocked === 3, before.highestUnlocked);
+
+  // 저장이 비어 있는 기기가 기본값을 올린 상황 (사파리 프라이빗 모드·저장소 차단)
+  const after = await server.syncAccount({ highestUnlocked: 1, levelStars: {} });
+  check('해금 지점이 안 깎인다', after.highestUnlocked === 3, after.highestUnlocked);
+  check('별점도 안 깎인다', after.levelStars[1] === 3 && after.levelStars[2] === 3, after.levelStars);
+
+  // 반대로 자칭도 안 먹는다
+  const claim = await server.syncAccount({ highestUnlocked: 30, levelStars: { 9: 3 } });
+  check('해금 지점을 자칭할 수 없다', claim.highestUnlocked === 3, claim.highestUnlocked);
+  check('별점을 자칭할 수 없다', claim.levelStars[9] === undefined, claim.levelStars);
 }
 
 // 10.7) 오늘의 무료 스핀 기록 — 늦은 날짜가 이긴다 (되돌리기로 스핀을 되살릴 수 없다)

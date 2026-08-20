@@ -178,9 +178,17 @@ export class LocalStorageAdapter implements StorageAdapter {
   async load(): Promise<SaveData> {
     try {
       const raw = localStorage.getItem(this.key);
-      if (!raw) return defaultSave();
-      return migrate(JSON.parse(raw));
+      if (!raw) {
+        storedSaveFound = false;
+        return defaultSave();
+      }
+      const data = migrate(JSON.parse(raw));
+      storedSaveFound = true;
+      return data;
     } catch {
+      // 읽기가 막힌 경우(사파리 프라이빗 모드, iframe 저장소 차단)도 '기록 없음'이다 —
+      // 이 세션의 로컬 값은 방금 만든 기본값이라 계정에 올릴 자격이 없다.
+      storedSaveFound = false;
       return defaultSave();
     }
   }
@@ -225,6 +233,21 @@ export function migrateGuestSave(account: string | null): 'migrated' | 'kept' | 
 }
 
 // ---- 전역 저장소 ----
+
+/**
+ * 이번 부팅에서 **실제로 저장된 기록을 읽어왔는가.**
+ *
+ * 이 값이 false 면 지금 메모리에 있는 것은 방금 만든 기본값이다 — 진행도 0, 진주 300.
+ * 그 상태를 계정에 올리면 계정이 그 기본값으로 깎인다(`net/serverAccount.ts` 참고).
+ * localStorage 가 막히거나(사파리 프라이빗 모드, iframe 저장소 분리) 비어 있는 경우가
+ * 그렇고, 실제로 그 경로에서 "클리어가 저장이 안 된다"가 나온다.
+ */
+let storedSaveFound = false;
+
+/** 이번 부팅이 저장된 기록에서 시작했는가 (아니면 기본값에서 시작했는가). */
+export function hasStoredSave(): boolean {
+  return storedSaveFound;
+}
 
 let adapter: StorageAdapter = new LocalStorageAdapter(GUEST_KEY);
 let cache: SaveData = defaultSave();

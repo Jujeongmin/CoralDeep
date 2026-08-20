@@ -432,15 +432,15 @@ class Server {
 
       const server = withHeartRegen(a, now);
       const clientLevelStars = cleanLevelStars(p.levelStars);
+      // 레벨 별점은 **오직 reportLevelClear 만** 건드린다. 여기서는 클라이언트 값을
+      // 쳐다보지도 않는다.
+      //
+      // 예전에는 `min(서버, 클라이언트)` 를 취했다. "재동기화로 별점을 자칭"하는 길은
+      // 막았지만, 반대 방향이 열려 있었다 — 로컬 저장이 비어 있는 기기(사파리 프라이빗
+      // 모드, iframe 저장소 분리, localStorage 를 지운 뒤)가 한 번 동기화하는 것만으로
+      // 계정의 별점이 그 빈 값까지 깎였다. 진행도는 소비되는 재화가 아니라 쌓이기만
+      // 하는 기록이라 min 을 취할 이유가 애초에 없다.
       const mergedLevelStars = { ...server.levelStars };
-      for (const id of Object.keys(clientLevelStars)) {
-        // 레벨 별점은 reportLevelClear 로만 올라간다 — 여기서는 하한(min)만 반영해
-        // "재동기화로 별점을 자칭"하는 길을 막는다. 서버에 그 레벨 기록이 아직 없으면
-        // (min 비교 대상이 없으면) 클라이언트 값도 안 받아들인다 — 같은 이유다.
-        if (server.levelStars[id] !== undefined) {
-          mergedLevelStars[id] = Math.min(server.levelStars[id], clientLevelStars[id]);
-        }
-      }
 
       // patch 에 boosters 자체가 없으면(부분 patch) 손대지 않는다 — cleanBoosters 는
       // 없는 필드를 전부 0으로 채우므로, 여기서 무조건 min 을 취하면 부스터가 하나도
@@ -467,7 +467,10 @@ class Server {
         infiniteHeartsUntil: Math.min(server.infiniteHeartsUntil, num(p.infiniteHeartsUntil ?? server.infiniteHeartsUntil)),
         boosters: mergedBoosters,
         levelStars: mergedLevelStars,
-        highestUnlocked: Math.min(server.highestUnlocked, Math.max(1, num(p.highestUnlocked ?? server.highestUnlocked) || 1)),
+        // 해금 지점도 같은 이유로 클라이언트를 안 본다 — 올리는 것은 reportLevelClear,
+        // 여기서는 서버 값을 그대로 둔다. min 을 취하면 진행도가 사라지고(위 주석),
+        // 클라이언트를 그대로 믿으면 30단계를 자칭할 수 있다. 안 받는 게 맞다.
+        highestUnlocked: server.highestUnlocked,
         // 진행도·소비 걱정이 없는 필드: 클라이언트를 그대로 믿는다.
         nickname: p.nickname !== undefined ? cleanNickname(p.nickname) : server.nickname,
         lang: p.lang !== undefined ? cleanLang(p.lang) : server.lang,
@@ -538,8 +541,18 @@ class Server {
       const a = withHeartRegen(await this.#loadAccount(), Date.now());
       const id = Math.max(1, Math.floor(Number(levelId) || 1));
       const clampedStars = Math.max(1, Math.min(3, Math.floor(Number(stars) || 1)));
-      if (id > a.highestUnlocked) throw new Error('level_locked');
 
+      // 해금 지점보다 앞선 레벨의 보고도 받는다 (예전에는 `level_locked` 로 거절했다).
+      //
+      // 거절하면 **보고 한 번이 실패한 뒤로 그 다음 판이 전부 거절된다**: 오프라인이나
+      // 타임아웃으로 N 번째 보고가 빠지면 서버 해금 지점은 N 에 멈춰 있는데 클라이언트는
+      // N+1, N+2 … 를 보고하므로 영영 따라잡지 못한다. "깬 판이 저장이 안 된다"의 한
+      // 원인이 이것이었다.
+      //
+      // 막아서 얻는 것도 거의 없다. 보상은 id 에 완만하게만 붙고(30 + id*1.5), 재도전
+      // 보고는 어차피 매번 보상을 준다 — 승패를 검증할 수 없다는 이 서버의 한계를
+      // 그대로 안고 가는 설계다(머리말 참고). 즉 진주를 부풀리는 길은 이 관문과 무관하게
+      // 이미 열려 있고, 이 관문이 실제로 막던 것은 정직한 플레이어의 진행도였다.
       const pearls = 30 + Math.floor(id * 1.5) + (clampedStars - 1) * 15;
       const prevStars = a.levelStars[id] ?? 0;
       const starsGained = Math.max(0, clampedStars - prevStars);
