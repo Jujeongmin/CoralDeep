@@ -110,7 +110,22 @@ async function boot(): Promise<void> {
     }
     // 돌아왔을 때는 밀린 클리어를 다시 밀어 본다. 나가 있는 동안 회선이 살아났을 수
     // 있고, 이 큐는 오래 들고 있을수록 다른 기기와 어긋난다.
-    void flushPendingClears();
+    //
+    // 이어서 계정도 다시 읽는다. 예전에는 계정을 **부팅 때 한 번만** 읽어서, PC 에서
+    // 깬 판이 이미 켜져 있던 폰에는 앱을 껐다 켜기 전까지 안 나타났다. 앱으로 돌아오는
+    // 순간이 다른 기기의 변화를 반영하기에 가장 자연스러운 지점이다.
+    void flushPendingClears().then(() => {
+      syncNow();
+      const screen = currentScreen();
+      if (screen === 'map' || screen === 'aquarium') {
+        // 값이 도착한 뒤에 다시 그려야 한다 — syncNow 는 응답을 기다리지 않으므로
+        // 여기서 바로 그리면 옛 값이 그대로다.
+        window.setTimeout(() => {
+          const now = currentScreen();
+          if (now === 'map' || now === 'aquarium') reloadScreen();
+        }, 1200);
+      }
+    });
   });
 }
 
