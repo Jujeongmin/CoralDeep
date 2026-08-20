@@ -16,7 +16,7 @@ import { renderMap } from './screens/map.ts';
 import { renderAquarium } from './screens/aquariumScreen.ts';
 import { renderLevel } from './screens/level.ts';
 import { refreshHearts } from './economy.ts';
-import { unlockAudio } from './audio.ts';
+import { startMusic, unlockAudio } from './audio.ts';
 import { initServerAccount, syncNow } from './net/serverAccount.ts';
 import { initVxShop } from './net/vx.ts';
 
@@ -55,6 +55,10 @@ async function boot(): Promise<void> {
 
   refreshHearts();
   unlockAudio();
+  // 배경 음악은 화면이 아니라 앱에 매단다 — 지도·수족관·판 안 어디서든 같은 곡이
+  // 끊기지 않고 이어진다. 자동재생이 막힌 브라우저(모바일 대부분)에서는 여기서
+  // 조용히 실패하고, 첫 터치에서 unlockAudio() 의 리스너가 다시 켠다.
+  void startMusic();
 
   // 계정 서버와의 첫 동기화(마이그레이션)는 배경에서 돈다 — 로컬은 이미 위에서
   // loadSave() 로 준비됐으므로, 접속이 느리거나 서버가 없어도(배포 전, 오프라인)

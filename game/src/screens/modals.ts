@@ -30,7 +30,7 @@ import {
   wheelFreeAvailable,
   type WheelSlot,
 } from '../economy.ts';
-import { applyVolumes, sfx, startAmbience } from '../audio.ts';
+import { applyVolumes, sfx, startMusic } from '../audio.ts';
 import { navigate, reloadScreen } from '../router.ts';
 import { createWheel } from './wheelView.ts';
 import { predatorArt } from '../render/predatorArt.ts';
@@ -602,7 +602,11 @@ export function openSettingsModal(refresh: Refresh): void {
               d.settings.bgmVolume = v;
             });
             // 0 에서 올렸으면 배경음을 다시 켠다 (applyVolumes 가 0 일 때 세워둔다)
-            if (v > 0) void startAmbience();
+            if (v > 0) {
+              void startMusic();
+              // 앰비언트는 판 안에서만 도는 소리다 — 지도에서 슬라이더를 올렸다고
+              // 여기서 켜지면 안 된다. 판에 다시 들어갈 때 level.ts 가 켠다.
+            }
           },
         ),
         volumeRow(

@@ -8,10 +8,13 @@
 //                                       break · coin · star · win · lose
 //   Freesound CC0 — ambience(504641 fission9) · flow(852478 kolbyrfx) ·
 //                   bubble(539823 ristooooo1) · growl(171178 yatoimtop)
+//   OpenGameArt CC0 — bgm: "Underwater Theme" by Cleyton Kauffman
+//                     (https://opengameart.org/content/underwater-theme)
 //
 // 큰 원본은 tools 하네스(/dev-audio.html)에서 잘라 모노·저샘플레이트 WAV 로 구웠다.
 
 import ambienceUrl from './assets/audio/ambience.wav';
+import bgmUrl from './assets/audio/bgm.mp3';
 import breakUrl from './assets/audio/break.ogg';
 import bubbleUrl from './assets/audio/bubble.wav';
 import clearUrl from './assets/audio/clear-1.ogg';
@@ -41,6 +44,7 @@ const CLIPS = {
   bubble: bubbleUrl,
   growl: growlUrl,
   ambience: ambienceUrl,
+  bgm: bgmUrl,
   flow: flowUrl,
   clear: clearUrl,
 } as const;
@@ -151,7 +155,10 @@ export function applyVolumes(): void {
   if (sfxBus) sfxBus.gain.value = sfxVol;
   if (bgmBus) bgmBus.gain.value = bgm;
   // 배경음을 0 으로 내렸으면 루프를 실제로 세운다 — 게인만 0 이면 디코딩·재생이 계속 돈다
-  if (bgm <= 0) stopAmbience();
+  if (bgm <= 0) {
+    stopAmbience();
+    stopMusic();
+  }
 }
 
 async function load(name: ClipName): Promise<void> {
@@ -197,6 +204,8 @@ export function unlockAudio(): void {
     for (const name of ['tap', 'swap', 'invalid', 'clear', 'break'] as ClipName[]) {
       void load(name);
     }
+    // 자동재생이 막혀 부팅 때 못 켰으면 여기서 켜진다 (이미 돌고 있으면 무시된다).
+    void startMusic();
   };
 
   // **한 번 듣고 떼지 않는다.** 예전에는 첫 터치에서 리스너를 제거했는데, iOS 는 앱을
@@ -235,9 +244,88 @@ function play(name: ClipName, opts: { rate?: number; gain?: number } = {}): void
 }
 
 // ---------- 배경음 ----------
+//
+// 두 겹이다.
+//   1) **음악**(bgm) — 앱 전체에 깔린다. 지도·수족관·판 안, 어디에 있든 끊기지 않는다.
+//   2) **물소리 앰비언트**(ambience) — 판 안에서만 그 위에 겹친다. 심해로 내려가 있는
+//      동안만 물이 가까이서 흐르는 셈이다.
+// 둘 다 같은 bgmBus 를 타므로 설정의 '배경음' 슬라이더 하나가 함께 조절한다.
 
 let loopSource: AudioBufferSourceNode | null = null;
 let loopGain: GainNode | null = null;
+let musicSource: AudioBufferSourceNode | null = null;
+let musicGain: GainNode | null = null;
+
+/** 음악 재생 크기. 앰비언트(0.28)보다 낮게 깐다 — 계속 도는 소리라 조금만 커도 지겹다. */
+const MUSIC_GAIN = 0.22;
+/** 음악 페이드인(초). 화면 열자마자 곡이 튀어나오면 놀란다 — 앰비언트와 같은 이유. */
+const MUSIC_FADE_SECONDS = 3;
+
+/**
+ * 디코딩된 앞뒤 무음을 뺀 루프 구간을 찾는다.
+ *
+ * MP3 는 인코더가 앞뒤에 무음 패딩을 붙인다(mp3 는 프레임 단위라 원본 길이에 딱 못
+ * 맞춘다). 그대로 `loop = true` 로 돌리면 한 바퀴마다 그 패딩만큼 소리가 끊겨 —
+ * 정확히 원작자가 "루프에는 mp3 말고 ogg/wav 를 써라"라고 적어 둔 그 증상이다.
+ * 우리는 어차피 통째로 디코딩해 쓰므로, 그 무음 구간을 찾아 loopStart/loopEnd 로
+ * 잘라내면 mp3 로도 이음새 없이 돈다.
+ *
+ * 임계값은 16비트 한 칸(1/32768 ≈ 0.00003)보다 넉넉히 위로 잡는다 — 디코더가 만드는
+ * 아주 작은 잔향까지 무음으로 보려는 것이 아니라, 명백한 침묵만 잘라내려는 것이다.
+ */
+const SILENCE_THRESHOLD = 0.001;
+
+function loopRange(buffer: AudioBuffer): { start: number; end: number } {
+  const data = buffer.getChannelData(0);
+  let first = 0;
+  let last = data.length - 1;
+  while (first < last && Math.abs(data[first]) < SILENCE_THRESHOLD) first++;
+  while (last > first && Math.abs(data[last]) < SILENCE_THRESHOLD) last--;
+  // 전부 무음이면(있을 리 없지만) 통째로 돌린다 — 0 길이 루프는 소리를 멈춰 세운다.
+  if (last <= first) return { start: 0, end: buffer.duration };
+  return { start: first / buffer.sampleRate, end: (last + 1) / buffer.sampleRate };
+}
+
+/**
+ * 배경 음악을 깐다. 앱이 살아 있는 동안 계속 돈다 — 화면을 옮겨도 안 끊는다.
+ * 여러 번 불러도 이미 돌고 있으면 아무 일도 안 한다.
+ */
+export async function startMusic(): Promise<void> {
+  const ac = context();
+  if (!ac || !bgmBus || musicSource) return;
+  if (volumes().bgm <= 0) return;
+  await load('bgm');
+  const buffer = buffers.get('bgm');
+  // await 사이에 다른 호출이 먼저 시작했을 수 있다 — 두 개가 겹쳐 돌면 위상이 어긋나
+  // 같은 곡이 둘로 들린다.
+  if (!buffer || musicSource) return;
+
+  const range = loopRange(buffer);
+  musicSource = ac.createBufferSource();
+  musicSource.buffer = buffer;
+  musicSource.loop = true;
+  musicSource.loopStart = range.start;
+  musicSource.loopEnd = range.end;
+  musicGain = ac.createGain();
+  musicGain.gain.setValueAtTime(0.0001, ac.currentTime);
+  musicGain.gain.linearRampToValueAtTime(MUSIC_GAIN, ac.currentTime + MUSIC_FADE_SECONDS);
+  musicSource.connect(musicGain).connect(bgmBus);
+  // 무음 패딩을 건너뛰고 시작한다 — 첫 바퀴만 앞에 침묵이 붙는 걸 막는다.
+  musicSource.start(0, range.start);
+}
+
+/** 음악을 세운다. 지금은 배경음 볼륨을 0 으로 내렸을 때만 부른다. */
+export function stopMusic(): void {
+  const ac = ctx;
+  if (!musicSource || !musicGain || !ac) return;
+  const source = musicSource;
+  musicGain.gain.cancelScheduledValues(ac.currentTime);
+  musicGain.gain.setValueAtTime(musicGain.gain.value, ac.currentTime);
+  musicGain.gain.linearRampToValueAtTime(0.0001, ac.currentTime + 0.6);
+  window.setTimeout(() => source.stop(), 700);
+  musicSource = null;
+  musicGain = null;
+}
 
 /** 심해 앰비언트를 깔아둔다. 화면을 나가면 stopAmbience 로 끈다. */
 export async function startAmbience(): Promise<void> {

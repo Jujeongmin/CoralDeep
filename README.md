@@ -361,6 +361,23 @@ Swimming_Impulse/Swimming_Normal)를 갖고 있다. 그중 가장 길고 매끄�
 
 바꿀 때는 `game/src/assets/icons/` 의 파일만 교체하면 된다. `icons.ts` 의 이름 매핑은 그대로 쓰면 된다.
 
+## 소리 (`audio.ts`)
+
+배경음은 두 겹이다. **음악**은 앱에 매달려 지도·수족관·판 안 어디서든 끊기지 않고,
+**물소리 앰비언트**는 판 안에서만 그 위에 겹친다 — 심해로 내려가 있는 동안만 물이 가까이
+흐르는 셈이다. 둘 다 같은 `bgmBus` 를 타서 설정의 '배경음' 슬라이더 하나가 함께 조절한다.
+
+| 소리 | 출처 | 라이선스 |
+| --- | --- | --- |
+| 음악 (`bgm.mp3`) | ["Underwater Theme" — Cleyton Kauffman](https://opengameart.org/content/underwater-theme) | CC0 — 표기 불필요 |
+| 물소리·기포·으르렁 | Freesound (504641 · 852478 · 539823 · 171178) | CC0 |
+| UI·매치 효과음 | [Kenney](https://kenney.nl/assets) | CC0 |
+
+**mp3 를 루프로 돌릴 때 주의**: mp3 는 인코더가 앞뒤에 무음 패딩을 붙여서 그대로
+`loop = true` 로 돌리면 한 바퀴마다 소리가 끊긴다 (원작자도 "루프에는 ogg/wav 를 써라"고
+적어 뒀다). 우리는 어차피 통째로 디코딩해 쓰므로, 디코딩된 버퍼에서 앞뒤 무음을 찾아
+`loopStart`/`loopEnd` 로 잘라낸다 (`loopRange()`) — mp3 그대로도 이음새가 없다.
+
 ## 룰렛 (`render` 아님 — `screens/wheelView.ts`)
 
 예전에는 격자 8칸에 표시등이 순서대로 켜졌다 꺼졌다. 그건 룰렛이 아니라 **로딩 표시**로 보인다.
@@ -519,7 +536,10 @@ Verse8 은 모바일 앱(`io.verse8.mobile`) 웹뷰에서 게임을 띄운다. �
 - `-webkit-touch-callout: none`, `contextmenu` 차단 — 길게 눌러도 메뉴가 안 뜬다
 - `PointerEvent` 미지원 구형 웹뷰용 `touchstart/touchend` 폴백
 - 입력 시점에 캔버스 크기를 재확인 — `ResizeObserver` 가 밀려도 탭 좌표가 어긋나지 않는다
-- iOS 오디오 언락 — 첫 터치에서 `AudioContext` 를 열어 타이머 효과음도 정상 재생
+- iOS 오디오 — 세 가지를 같이 해야 실제로 소리가 난다 (`audio.ts`):
+  `navigator.audioSession.type = 'playback'` (무음 스위치를 안 타게), 컨텍스트가
+  `running` 이 아니면 깨우기 (Safari 의 비표준 `interrupted` 상태까지 잡는다),
+  첫 제스처 리스너를 **떼지 않고** 계속 달아 두기 (앱을 벗어났다 오면 다시 재워지므로)
 - 정지 화면에서는 캔버스를 다시 그리지 않는다 (배터리)
 - devicePixelRatio 상한 2
 - 가로 모드 / 360px 미만 좁은 화면 미디어 쿼리
