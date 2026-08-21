@@ -284,6 +284,10 @@ export function openShopModal(refresh: Refresh): void {
       // 충분하고(대시보드 값이 그새 바뀌었을 수 있으니), 굳이 서버를 다시 부르지 않는다.
       stopVxWatch = watchVxShop((purchased) => {
         if (purchased) {
+          // 결제창이 닫힌 것만으로는 "샀다"가 화면에 안 남는다 — 줄이 '보유 중'으로
+          // 바뀌는 건 서버 응답이 온 뒤라 몇 백 ms 뒤고, 그 사이 사용자는 아무 일도
+          // 안 일어난 것으로 본다. 결제가 끝난 그 자리에서 바로 알린다.
+          toast(t('purchaseSuccess'));
           void refreshAccountRemote().finally(() => {
             refresh();
             rebuild();
